@@ -1,0 +1,24 @@
+[tool.poetry]
+name = "dockerview"
+version = "0.1.0"
+description = "An interactive terminal dashboard for monitoring and managing Docker Compose environments"
+authors = ["Chris Dial <dial.chris@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = ">=3.8.1,<4.0"
+textual = "^1.0.0"
+docker = "^7.0.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0.0"
+black = "^24.1.1"
+isort = "^5.13.2"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+dockerview = "dockerview.app:main"

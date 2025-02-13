@@ -69,12 +69,15 @@ Docker Engine <-> Docker SDK <-> State Manager <-> UI Components
 git clone https://github.com/yourusername/dockerview.git
 cd dockerview
 
-# Create and activate virtual environment
-python -m venv venv
-source venv/bin/activate  # or `venv\Scripts\activate` on Windows
+# Install Poetry if not already installed
+# On Linux/macOS
+pip install poetry
 
-# Install dependencies
-pip install -r requirements.txt
+# Install dependencies and create virtual environment
+poetry install
+
+# Activate the virtual environment
+poetry shell
 
 # Run dockerview
 python -m dockerview
