@@ -10,7 +10,11 @@ from rich.console import RenderableType
 logger = logging.getLogger('dockerview.containers')
 
 class StackHeader(Static):
-    """A header widget for Docker Compose stacks."""
+    """A header widget for displaying Docker Compose stack information.
+
+    Displays stack name, configuration file path, and container counts with
+    collapsible/expandable functionality.
+    """
 
     COMPONENT_CLASSES = {"header": "stack-header--header"}
 
@@ -34,6 +38,15 @@ class StackHeader(Static):
     """
 
     def __init__(self, stack_name: str, config_file: str, running: int, exited: int, total: int):
+        """Initialize the stack header.
+
+        Args:
+            stack_name: Name of the Docker Compose stack
+            config_file: Path to the compose configuration file
+            running: Number of running containers
+            exited: Number of exited containers
+            total: Total number of containers
+        """
         super().__init__("")
         self.stack_name = stack_name
         self.expanded = False
@@ -42,10 +55,11 @@ class StackHeader(Static):
         self.total = total
         self.config_file = config_file
         self.can_focus = True
+        self._last_click_time = 0
         self._update_content()
 
     def _update_content(self) -> None:
-        """Update the header content with current state."""
+        """Update the header's displayed content based on current state."""
         icon = "▼" if self.expanded else "▶"
         running_text = Text(f"Running: {self.running}", style="green")
         exited_text = Text(f"Exited: {self.exited}", style="yellow")
@@ -75,12 +89,29 @@ class StackHeader(Static):
         self.refresh()
 
     def toggle(self) -> None:
-        """Toggle the expanded state."""
+        """Toggle the expanded/collapsed state of the stack."""
         self.expanded = not self.expanded
         self._update_content()
 
+    def on_click(self) -> None:
+        """Handle click events for double-click detection."""
+        import time
+        current_time = time.time()
+
+        if current_time - self._last_click_time < 0.5:
+            self.focus()
+            if self.screen:
+                container_list = self.screen.query_one("ContainerList")
+                container_list.action_toggle_stack()
+
+        self._last_click_time = current_time
+
 class ContainerList(VerticalScroll):
-    """A widget for displaying Docker containers grouped by stack."""
+    """A scrollable widget that displays Docker containers grouped by their stacks.
+
+    Provides collapsible stack sections with container details including resource usage
+    and status information. Supports keyboard navigation and interaction.
+    """
 
     DEFAULT_CSS = """
     ContainerList {
@@ -118,10 +149,9 @@ class ContainerList(VerticalScroll):
     ]
 
     def __init__(self):
-        logger.info("Starting ContainerList initialization")
+        """Initialize the container list widget."""
         try:
             super().__init__()
-            logger.info("After ContainerList super().__init__()")
             self.stack_tables = {}  # Dictionary to store tables for each stack
             self.stack_headers = {}  # Dictionary to store headers for each stack
             self.container_rows = {}  # Dictionary to track container rows by ID
@@ -129,13 +159,19 @@ class ContainerList(VerticalScroll):
             self.expanded_stacks = set()  # Keep track of which stacks are expanded
             self._is_updating = False  # Track if we're in a batch update
             self._pending_clear = False  # Track if we need to clear during batch update
-            logger.info("Finished ContainerList initialization")
         except Exception as e:
             logger.error(f"Error during ContainerList initialization: {str(e)}", exc_info=True)
             raise
 
     def create_stack_table(self, stack_name: str) -> DataTable:
-        """Create a new DataTable for a stack."""
+        """Create a new DataTable for displaying container information.
+
+        Args:
+            stack_name: Name of the stack this table will display
+
+        Returns:
+            DataTable: A configured table for displaying container information
+        """
         table = DataTable()
         table.add_columns(
             "ID", "Name", "Status", "CPU %", "Memory", "PIDs"
@@ -146,50 +182,35 @@ class ContainerList(VerticalScroll):
         return table
 
     def begin_update(self) -> None:
-        """Begin a batch update to prevent UI flickering."""
-        logger.info("Beginning batch update")
+        """Begin a batch update to prevent UI flickering during data updates."""
         self._is_updating = True
-        # Only set pending_clear if this is the first update (no widgets mounted)
         self._pending_clear = len(self.children) == 0
 
-        # Clear all tables but keep the table objects
         for table in self.stack_tables.values():
             table.clear()
-        # Reset container tracking since all rows are now gone
         self.container_rows.clear()
 
     def end_update(self) -> None:
-        """End a batch update and apply pending changes."""
-        logger.info("Ending batch update")
+        """End a batch update and apply pending changes to the UI."""
         try:
-            # Only do full clear and remount on first update
             if self._pending_clear:
-                logger.debug("First update - doing full clear and remount")
                 self.clear()
 
-                # Create all containers first
                 stack_containers = {}
                 for stack_name in sorted(self.stack_headers.keys()):
                     header = self.stack_headers[stack_name]
                     table = self.stack_tables[stack_name]
-
-                    # Create container
                     stack_container = Container(classes="stack-container")
                     stack_containers[stack_name] = (stack_container, header, table)
 
-                # Now mount everything in order
                 for stack_name, (container, header, table) in stack_containers.items():
-                    # Mount the container to the main widget first
                     self.mount(container)
-                    # Then mount the children to the container
                     container.mount(header)
                     container.mount(table)
-                    # Set correct display state
                     table.styles.display = "block" if header.expanded else "none"
 
                 self._pending_clear = False
 
-                # Restore focus if needed
                 if self.current_focus:
                     if self.current_focus in self.stack_headers:
                         self.stack_headers[self.current_focus].focus()
@@ -198,7 +219,6 @@ class ContainerList(VerticalScroll):
 
             self._is_updating = False
         finally:
-            # Only do a layout refresh if we did a full remount
             if len(self.children) > 0:
                 self.refresh()
 
@@ -224,8 +244,15 @@ class ContainerList(VerticalScroll):
         self.remove_children()
 
     def add_stack(self, name: str, config_file: str, running: int, exited: int, total: int) -> None:
-        """Add or update a stack section."""
-        logger.debug(f"Adding/updating stack: {name}")
+        """Add or update a stack section in the container list.
+
+        Args:
+            name: Name of the stack
+            config_file: Path to the compose configuration file
+            running: Number of running containers
+            exited: Number of exited containers
+            total: Total number of containers
+        """
         if name not in self.stack_tables:
             header = StackHeader(name, config_file, running, exited, total)
             table = self.create_stack_table(name)
@@ -233,40 +260,39 @@ class ContainerList(VerticalScroll):
             self.stack_headers[name] = header
             self.stack_tables[name] = table
 
-            # Restore expanded state
             if name in self.expanded_stacks:
                 header.expanded = True
                 table.styles.display = "block"
 
-            # Only mount if not in batch update
             if not self._is_updating:
-                # Create and mount container first
                 stack_container = Container(classes="stack-container")
                 self.mount(stack_container)
-                # Then mount children
                 stack_container.mount(header)
                 stack_container.mount(table)
         else:
             header = self.stack_headers[name]
-            was_expanded = header.expanded  # Remember expansion state
+            was_expanded = header.expanded
             header.running = running
             header.exited = exited
             header.total = total
             header.config_file = config_file
-            header.expanded = was_expanded  # Restore expansion state
+            header.expanded = was_expanded
             self.stack_tables[name].styles.display = "block" if was_expanded else "none"
             header._update_content()
 
     def add_container_to_stack(self, stack_name: str, container_data: dict) -> None:
-        """Add or update a container in a specific stack's table."""
-        logger.debug(f"Adding/updating container in stack {stack_name}: {container_data.get('name', 'unnamed')}")
+        """Add or update a container in its stack's table.
+
+        Args:
+            stack_name: Name of the stack the container belongs to
+            container_data: Dictionary containing container information
+        """
         if stack_name not in self.stack_tables:
             self.add_stack(stack_name, "N/A", 0, 0, 0)
 
         table = self.stack_tables[stack_name]
         container_id = container_data["id"]
 
-        # Prepare row data tuple
         row_data = (
             container_data["id"],
             container_data["name"],
@@ -277,32 +303,31 @@ class ContainerList(VerticalScroll):
         )
 
         try:
-            # Always add as a new row since tables are cleared at the start of each update
             row_key = table.row_count
             table.add_row(*row_data)
             self.container_rows[container_id] = (stack_name, row_key)
-            logger.debug(f"Added row {row_key} for container {container_id} with status {container_data['status']}")
 
         except Exception as e:
             logger.error(f"Error adding container {container_id}: {str(e)}", exc_info=True)
             return
 
-        # If we're in a batch update and this is the last container,
-        # mount all widgets at once
         if self._is_updating and self._pending_clear:
             try:
-                for header in self.stack_headers.values():
-                    self.mount(header)
-                    if header.stack_name in self.expanded_stacks:
-                        header.expanded = True
-                for table in self.stack_tables.values():
-                    self.mount(table)
-                    if table in self.stack_tables.values():
-                        stack_name = next(name for name, t in self.stack_tables.items() if t == table)
-                        table.display = stack_name in self.expanded_stacks
+                stack_containers = {}
+                for stack_name in sorted(self.stack_headers.keys()):
+                    header = self.stack_headers[stack_name]
+                    table = self.stack_tables[stack_name]
+                    stack_container = Container(classes="stack-container")
+                    stack_containers[stack_name] = (stack_container, header, table)
+
+                for stack_name, (container, header, table) in stack_containers.items():
+                    self.mount(container)
+                    container.mount(header)
+                    container.mount(table)
+                    table.styles.display = "block" if header.expanded else "none"
+
                 self._pending_clear = False
 
-                # Restore focus if needed
                 if self.current_focus:
                     if self.current_focus in self.stack_headers:
                         self.stack_headers[self.current_focus].focus()
@@ -312,7 +337,7 @@ class ContainerList(VerticalScroll):
                 logger.error(f"Error mounting widgets: {str(e)}", exc_info=True)
 
     def action_toggle_stack(self) -> None:
-        """Toggle the visibility of the selected stack's containers."""
+        """Toggle the visibility of the selected stack's container table."""
         for stack_name, header in self.stack_headers.items():
             if header.has_focus:
                 table = self.stack_tables[stack_name]
@@ -321,10 +346,8 @@ class ContainerList(VerticalScroll):
                 break
 
     def on_mount(self) -> None:
-        """Handle widget mount."""
-        logger.info("Starting ContainerList mount")
+        """Handle initial widget mount by focusing and expanding the first stack."""
         try:
-            # Focus and expand the first header if available
             headers = list(self.stack_headers.values())
             if headers:
                 first_header = headers[0]
@@ -332,11 +355,9 @@ class ContainerList(VerticalScroll):
                 first_header.expanded = True
                 first_table = self.stack_tables[first_header.stack_name]
                 first_table.display = True
-                # If the first stack has containers, select the first one
                 if first_table.row_count > 0:
                     first_table.focus()
                     first_table.move_cursor(row=0)
-            logger.info("Finished ContainerList mount")
         except Exception as e:
             logger.error(f"Error during ContainerList mount: {str(e)}", exc_info=True)
             raise
