@@ -21,8 +21,8 @@ class StackHeader(Static):
     DEFAULT_CSS = """
     StackHeader {
         background: $surface-darken-2;
-        padding: 1 1;
-        height: 5;
+        padding: 0 0;
+        height: 3;
         border-bottom: solid $primary-darken-3;
         margin: 0 0 0 0;
         color: $text;
@@ -146,11 +146,7 @@ class ContainerList(VerticalScroll):
     }
 
     .stack-container:first-of-type {
-        margin-top: 0;
-    }
-
-    .stack-container:last-of-type {
-        margin-bottom: 0;
+        margin-bottom: 1;
     }
 
     .stack-container StackHeader {

@@ -81,6 +81,28 @@ class ErrorDisplay(Static):
         super().update(renderable)
         self.styles.display = "block" if renderable else "none"
 
+class Instructions(Static):
+    """A widget that displays usage instructions."""
+
+    DEFAULT_CSS = """
+    Instructions {
+        background: $surface-darken-2;
+        color: $text-muted;
+        padding: 0 1 1 1;
+        height: auto;
+        text-align: left;
+    }
+    """
+
+    def __init__(self):
+        instructions = (
+            "• To follow logs for a docker compose stack:   docker compose -f <STACK_CONFIG_FILE> logs -f\n"
+            "• To follow logs for a container:              docker logs -f <CONTAINER_ID>\n"
+            "• To stop a docker compose stack:              docker compose -p <PROJECT_NAME> stop\n"
+            "• To start a docker compose stack:             docker compose -p <PROJECT_NAME> start\n"
+        )
+        super().__init__(instructions)
+
 class DockerViewApp(App):
     """A Textual TUI application for monitoring Docker containers and stacks."""
 
@@ -127,7 +149,7 @@ class DockerViewApp(App):
         border-bottom: solid $primary-darken-3;
         text-style: bold;
         height: 3;
-        padding: 0 2;
+        padding: 0 1;
     }
 
     Footer {
@@ -135,12 +157,13 @@ class DockerViewApp(App):
         color: $primary-lighten-2;
         border-top: solid $primary-darken-3;
         text-style: bold;
+        height: 2;
+        padding: 0 0;
     }
     """
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),
-        Binding("r", "refresh", "Manual Refresh"),
     ]
 
     def __init__(self):
@@ -170,6 +193,7 @@ class DockerViewApp(App):
         try:
             yield Header()
             logger.info("Added header")
+            yield Instructions()
             with Container():
                 with Vertical():
                     error = ErrorDisplay()
