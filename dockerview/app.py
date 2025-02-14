@@ -16,25 +16,27 @@ from pathlib import Path
 from dockerview.ui.containers import ContainerList
 from dockerview.docker.manager import DockerManager
 
-# Set up logging
 def setup_logging():
-    """Configure logging to write to file only."""
-    # Create logs directory if it doesn't exist
+    """Configure logging to write to file in the user's home directory.
+
+    Creates a .dockerview/logs directory in the user's home directory and sets up
+    file-based logging with detailed formatting.
+
+    Returns:
+        Path: Path to the log file
+    """
     log_dir = Path.home() / '.dockerview' / 'logs'
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / 'dockerview.log'
 
-    # Create formatter
     file_formatter = logging.Formatter(
         '%(asctime)s - %(name)s - %(levelname)s - %(threadName)s - %(message)s'
     )
 
-    # Create and configure file handler
     file_handler = logging.FileHandler(log_file)
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(file_formatter)
 
-    # Configure root logger
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.DEBUG)
     root_logger.addHandler(file_handler)
@@ -47,7 +49,10 @@ logger = logging.getLogger('dockerview')
 logger.info(f"Logging initialized. Log file: {log_file}")
 
 class ErrorDisplay(Static):
-    """A widget to display error messages."""
+    """A widget that displays error messages with error styling.
+
+    The widget is hidden when there is no error message to display.
+    """
 
     DEFAULT_CSS = """
     ErrorDisplay {
@@ -60,12 +65,16 @@ class ErrorDisplay(Static):
     """
 
     def update(self, renderable: RenderableType) -> None:
-        """Update error message and visibility."""
+        """Update the error message and visibility state.
+
+        Args:
+            renderable: The error message to display
+        """
         super().update(renderable)
         self.styles.display = "block" if renderable else "none"
 
 class DockerViewApp(App):
-    """A Textual app for monitoring Docker containers."""
+    """A Textual TUI application for monitoring Docker containers and stacks."""
 
     CSS = """
     Screen {
@@ -88,6 +97,7 @@ class DockerViewApp(App):
     ]
 
     def __init__(self):
+        """Initialize the application and Docker manager."""
         logger.info("Starting DockerViewApp initialization")
         try:
             super().__init__(driver_class=None)
@@ -104,7 +114,11 @@ class DockerViewApp(App):
             raise
 
     def compose(self) -> ComposeResult:
-        """Create child widgets for the app."""
+        """Create the application's widget hierarchy.
+
+        Returns:
+            ComposeResult: The composed widget tree
+        """
         logger.info("Starting composition")
         try:
             yield Header()
@@ -129,7 +143,10 @@ class DockerViewApp(App):
             raise
 
     def on_mount(self) -> None:
-        """After the app is mounted, populate the container list."""
+        """Set up the application after widgets are mounted.
+
+        Initializes the container list, error display, and starts the auto-refresh timer.
+        """
         logger.info("Starting mount")
         try:
             self.title = "Docker Container Monitor"
@@ -169,13 +186,13 @@ class DockerViewApp(App):
         logger.info(f"App state changed from {old_state} to {new_state}")
 
     def action_quit(self) -> None:
-        """Handle the quit action."""
+        """Handle the quit action by stopping the refresh timer and exiting."""
         if self.refresh_timer:
             self.refresh_timer.stop()
         self.exit()
 
     def action_refresh(self) -> None:
-        """Trigger an async refresh of the container list."""
+        """Trigger an asynchronous refresh of the container list."""
         logger.info("Refresh action triggered")
         try:
             # Use call_after_refresh to ensure we're in the right context
@@ -186,8 +203,13 @@ class DockerViewApp(App):
 
     @work(thread=True)
     def _refresh_containers_worker(self) -> Tuple[Dict, List]:
-        """Worker function to refresh containers in a thread.
-        Returns a tuple of (stacks, containers)."""
+        """Worker function to fetch container and stack data in a background thread.
+
+        Returns:
+            Tuple[Dict, List]: A tuple containing:
+                - Dict: Mapping of stack names to stack information
+                - List: List of container information dictionaries
+        """
         logger.info("Starting container refresh in thread")
         try:
             # Get stacks and containers in the thread
@@ -206,7 +228,11 @@ class DockerViewApp(App):
             return {}, []
 
     async def refresh_containers(self) -> None:
-        """Start an async worker to refresh containers."""
+        """Refresh the container list asynchronously.
+
+        Fetches updated container and stack information in a background thread,
+        then updates the UI with the new data.
+        """
         logger.info("Starting container refresh")
         if not all([self.container_list, self.error_display]):
             logger.error("[REFRESH] Error: Widgets not properly initialized")
@@ -280,7 +306,7 @@ class DockerViewApp(App):
             self.error_display.update(f"Error refreshing: {str(e)}")
 
 def main():
-    """Run the app."""
+    """Run the Docker container monitoring application."""
     logger.info("Starting application")
     try:
         app = DockerViewApp()
