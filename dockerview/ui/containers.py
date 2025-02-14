@@ -20,15 +20,24 @@ class StackHeader(Static):
 
     DEFAULT_CSS = """
     StackHeader {
-        background: $panel;
-        padding: 0 1;
-        height: 3;
-        border-bottom: solid $primary;
+        background: $surface-darken-2;
+        padding: 1 1;
+        height: 5;
+        border-bottom: solid $primary-darken-3;
         margin: 0 0 0 0;
+        color: $text;
+    }
+
+    StackHeader:hover {
+        background: $surface-lighten-1;
+        color: $primary-lighten-1;
+        text-style: bold;
     }
 
     StackHeader:focus {
-        background: $accent;
+        background: $surface-lighten-2;
+        color: $primary-lighten-2;
+        text-style: bold;
     }
 
     .stack-header--header {
@@ -49,7 +58,7 @@ class StackHeader(Static):
         """
         super().__init__("")
         self.stack_name = stack_name
-        self.expanded = False
+        self.expanded = True
         self.running = running
         self.exited = exited
         self.total = total
@@ -75,7 +84,7 @@ class StackHeader(Static):
             Text(self.stack_name, style="bold"),
             " ",
             Text(f"({self.config_file})", style="dim"),
-            " - ",
+            "\n",
             status
         )
         self.update(content)
@@ -115,10 +124,10 @@ class ContainerList(VerticalScroll):
 
     DEFAULT_CSS = """
     ContainerList {
-        background: $surface;
+        background: transparent;
         height: auto;
-        border: round $primary;
-        padding: 0 1;
+        border: none;
+        padding: 0;
     }
 
     StackHeader {
@@ -132,12 +141,34 @@ class ContainerList(VerticalScroll):
         width: 100%;
         height: auto;
         margin: 0 0 1 0;
+        background: $surface;
+        border: solid $primary-darken-3;
+    }
+
+    .stack-container:first-of-type {
+        margin-top: 0;
+    }
+
+    .stack-container:last-of-type {
+        margin-bottom: 0;
+    }
+
+    .stack-container StackHeader {
+        background: $surface-darken-2;
+        border-bottom: solid $primary-darken-3;
     }
 
     DataTable {
-        margin: 0 1 1 2;
-        border: solid $primary;
+        margin: 0;
+        padding: 0 1;
+        border: none;
         display: none;
+        background: transparent;
+    }
+
+    .stack-container DataTable {
+        border: none;
+        background: $surface;
     }
     """
 
@@ -195,22 +226,23 @@ class ContainerList(VerticalScroll):
         try:
             if self._pending_clear:
                 self.clear()
-
-                stack_containers = {}
-                for stack_name in sorted(self.stack_headers.keys()):
-                    header = self.stack_headers[stack_name]
-                    table = self.stack_tables[stack_name]
-                    stack_container = Container(classes="stack-container")
-                    stack_containers[stack_name] = (stack_container, header, table)
-
-                for stack_name, (container, header, table) in stack_containers.items():
-                    self.mount(container)
-                    container.mount(header)
-                    container.mount(table)
-                    table.styles.display = "block" if header.expanded else "none"
-
                 self._pending_clear = False
 
+            stack_containers = {}
+            for stack_name in sorted(self.stack_headers.keys()):
+                header = self.stack_headers[stack_name]
+                table = self.stack_tables[stack_name]
+
+                if not header.parent: # Only mount if not already mounted
+                    stack_container = Container(classes="stack-container") # Create a new container
+                    stack_containers[stack_name] = (stack_container, header, table)
+                    self.mount(stack_containers[stack_name][0])
+                    logger.info(f"Mounting stack container for {stack_name} for header {header.stack_name} and {header.config_file}")
+                    stack_container.mount(header)
+                    stack_container.mount(table)
+                    table.styles.display = "block" if header.expanded else "none"
+
+                # Restore focus if needed
                 if self.current_focus:
                     if self.current_focus in self.stack_headers:
                         self.stack_headers[self.current_focus].focus()
@@ -221,6 +253,7 @@ class ContainerList(VerticalScroll):
         finally:
             if len(self.children) > 0:
                 self.refresh()
+            self._is_updating = False
 
     def clear(self) -> None:
         """Clear all stacks and containers while preserving expansion states."""
@@ -253,6 +286,7 @@ class ContainerList(VerticalScroll):
             exited: Number of exited containers
             total: Total number of containers
         """
+
         if name not in self.stack_tables:
             header = StackHeader(name, config_file, running, exited, total)
             table = self.create_stack_table(name)
@@ -264,11 +298,14 @@ class ContainerList(VerticalScroll):
                 header.expanded = True
                 table.styles.display = "block"
 
+            # Create and mount the container immediately unless we're in a batch update
             if not self._is_updating:
                 stack_container = Container(classes="stack-container")
                 self.mount(stack_container)
                 stack_container.mount(header)
                 stack_container.mount(table)
+                # Ensure proper display state
+                table.styles.display = "block" if header.expanded else "none"
         else:
             header = self.stack_headers[name]
             was_expanded = header.expanded
@@ -311,6 +348,7 @@ class ContainerList(VerticalScroll):
             logger.error(f"Error adding container {container_id}: {str(e)}", exc_info=True)
             return
 
+
         if self._is_updating and self._pending_clear:
             try:
                 stack_containers = {}
@@ -336,6 +374,7 @@ class ContainerList(VerticalScroll):
             except Exception as e:
                 logger.error(f"Error mounting widgets: {str(e)}", exc_info=True)
 
+
     def action_toggle_stack(self) -> None:
         """Toggle the visibility of the selected stack's container table."""
         for stack_name, header in self.stack_headers.items():
@@ -354,7 +393,7 @@ class ContainerList(VerticalScroll):
                 first_header.focus()
                 first_header.expanded = True
                 first_table = self.stack_tables[first_header.stack_name]
-                first_table.display = True
+                first_table.styles.display = "block"
                 if first_table.row_count > 0:
                     first_table.focus()
                     first_table.move_cursor(row=0)

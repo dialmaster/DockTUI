@@ -14,7 +14,7 @@ import os
 from pathlib import Path
 
 from dockerview.ui.containers import ContainerList
-from dockerview.docker.manager import DockerManager
+from dockerview.docker_mgmt.manager import DockerManager
 
 def setup_logging():
     """Configure logging to write to file in the user's home directory.
@@ -78,7 +78,7 @@ class DockerViewApp(App):
 
     CSS = """
     Screen {
-        background: $surface;
+        background: $surface-darken-1;
     }
 
     Container {
@@ -88,6 +88,45 @@ class DockerViewApp(App):
     Vertical {
         height: auto;
         width: 100%;
+        padding: 0 1;
+    }
+
+    DataTable {
+        background: $surface;
+        border: none;
+    }
+
+    DataTable > .datatable--header {
+        background: $surface;
+        color: $text;
+        text-style: bold;
+        border-bottom: solid $primary-darken-2;
+    }
+
+    DataTable > .datatable--cursor {
+        background: $primary-darken-3;
+        color: $text;
+    }
+
+    DataTable:focus > .datatable--cursor {
+        background: $primary-darken-2;
+        color: $text;
+    }
+
+    Header {
+        background: $surface-darken-2;
+        color: $primary-lighten-2;
+        border-bottom: solid $primary-darken-3;
+        text-style: bold;
+        height: 3;
+        padding: 0 2;
+    }
+
+    Footer {
+        background: $primary-darken-2;
+        color: $primary-lighten-2;
+        border-top: solid $primary-darken-3;
+        text-style: bold;
     }
     """
 
