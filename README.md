@@ -11,9 +11,7 @@ dockerview is a modern terminal user interface (TUI) for real-time monitoring an
 - Real-time monitoring of Docker containers and Docker Compose stacks
 - Interactive terminal interface with keyboard navigation
 - Collapsible/expandable Docker Compose stack views
-- Live resource usage statistics (CPU, Memory, Network)
-- Integrated log viewing with automatic tailing
-- Direct container and stack control (start/stop/restart)
+- Live resource usage statistics (CPU, Memory)
 - Low system resource footprint
 - Cross-platform support (Linux, macOS, Windows)
 
@@ -58,7 +56,7 @@ Docker Engine <-> Docker SDK <-> State Manager <-> UI Components
 
 ### Requirements
 
-- Python 3.7+
+- Python 3.8+
 - Docker Engine
 - Docker Compose
 
