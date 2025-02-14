@@ -20,11 +20,18 @@ def setup_logging():
     """Configure logging to write to file in the user's home directory.
 
     Creates a .dockerview/logs directory in the user's home directory and sets up
-    file-based logging with detailed formatting.
+    file-based logging with detailed formatting. Only enables logging if DEBUG mode
+    is active.
 
     Returns:
-        Path: Path to the log file
+        Path: Path to the log file, or None if logging is disabled
     """
+    # Check if debug mode is enabled
+    if not os.environ.get('DOCKERVIEW_DEBUG'):
+        # Disable all logging
+        logging.getLogger().setLevel(logging.CRITICAL)
+        return None
+
     log_dir = Path.home() / '.dockerview' / 'logs'
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / 'dockerview.log'
@@ -46,7 +53,8 @@ def setup_logging():
 # Initialize logging
 log_file = setup_logging()
 logger = logging.getLogger('dockerview')
-logger.info(f"Logging initialized. Log file: {log_file}")
+if log_file:  # Only log if debug mode is enabled
+    logger.info(f"Logging initialized. Log file: {log_file}")
 
 class ErrorDisplay(Static):
     """A widget that displays error messages with error styling.
