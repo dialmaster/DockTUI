@@ -5,7 +5,7 @@ import logging
 from typing import Dict, List, Optional
 from collections import defaultdict
 
-logger = logging.getLogger('dockerview.docker')
+logger = logging.getLogger('dockerview.docker_mgmt')
 
 class DockerManager:
     """Manages Docker interactions."""
