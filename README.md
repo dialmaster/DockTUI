@@ -1,6 +1,7 @@
 # dockerview
 
 An interactive terminal dashboard for monitoring and managing Docker Compose environments.
+This is designed to replicate, somewhat, the main UI view from Docker Desktop.
 
 ## Overview
 
