@@ -326,13 +326,16 @@ class ContainerList(VerticalScroll):
         table = self.stack_tables[stack_name]
         container_id = container_data["id"]
 
+        # Format PIDs to show "N/A" when 0
+        pids_display = "N/A" if container_data["pids"] == "0" else container_data["pids"]
+
         row_data = (
             container_data["id"],
             container_data["name"],
             container_data["status"],
             container_data["cpu"],
             container_data["memory"],
-            container_data["pids"]
+            pids_display
         )
 
         try:
