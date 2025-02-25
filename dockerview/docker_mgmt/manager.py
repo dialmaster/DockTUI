@@ -4,6 +4,7 @@ import json
 import logging
 from typing import Dict, List, Optional
 from collections import defaultdict
+import time
 
 logger = logging.getLogger('dockerview.docker_mgmt')
 
@@ -89,16 +90,26 @@ class DockerManager:
         """
         stats_dict = {}
         try:
+            logger.debug("Starting docker stats subprocess call")
+            subprocess_start = time.time()
+
             stats_output = subprocess.check_output(
                 ['docker', 'stats', '--no-stream', '--format', '{{.ID}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}\t{{.PIDs}}'],
                 universal_newlines=True,
                 stderr=subprocess.PIPE
             )
 
+            subprocess_end = time.time()
+            logger.debug(f"Docker stats subprocess call completed in {subprocess_end - subprocess_start:.3f}s")
+
+            parsing_start = time.time()
+            container_count = 0
+
             for line in stats_output.strip().split('\n'):
                 if not line:
                     continue
                 try:
+                    container_count += 1
                     cid, cpu, mem_usage, mem_perc, pids = line.split('\t')
                     short_id = cid[:12]
 
@@ -114,6 +125,10 @@ class DockerManager:
                 except Exception as e:
                     logger.error(f"Error parsing stats line '{line}': {str(e)}", exc_info=True)
                     continue
+
+            parsing_end = time.time()
+            logger.debug(f"Parsed stats for {container_count} containers in {parsing_end - parsing_start:.3f}s")
+            logger.debug(f"Total get_all_container_stats time: {parsing_end - subprocess_start:.3f}s")
 
         except Exception as e:
             error_msg = f"Error getting container stats: {str(e)}"
@@ -137,9 +152,13 @@ class DockerManager:
         """
         containers = []
         try:
-            stacks = self.get_compose_stacks()
+            # Get all container stats in a single call first (this is the most time-consuming operation)
             all_stats = self.get_all_container_stats()
 
+            # Then get the stacks information
+            stacks = self.get_compose_stacks()
+
+            # Process the containers with their stats
             for stack_name, stack_info in stacks.items():
                 for container in stack_info['containers']:
                     try:
