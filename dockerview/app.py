@@ -107,6 +107,24 @@ class Instructions(Static):
         )
         super().__init__(instructions)
 
+class StatusBar(Static):
+    """A widget that displays the current selection status at the bottom of the screen."""
+
+    DEFAULT_CSS = """
+    StatusBar {
+        background: $surface-darken-1;
+        color: $text;
+        height: 3;
+        dock: bottom;
+        padding: 0 1;
+        text-align: center;
+    }
+    """
+
+    def __init__(self):
+        """Initialize the status bar with an empty message."""
+        super().__init__("No selection")
+
 class DockerViewApp(App):
     """A Textual TUI application for monitoring Docker containers and stacks."""
 
@@ -180,6 +198,8 @@ class DockerViewApp(App):
             self.refresh_timer: Timer | None = None
             self._current_worker: Worker | None = None
             self._refresh_count = 0
+            self.footer: Footer | None = None
+            self.status_bar: StatusBar | None = None
         except Exception as e:
             logger.error(f"Error during initialization: {str(e)}", exc_info=True)
             raise
@@ -201,7 +221,12 @@ class DockerViewApp(App):
                     container_list = ContainerList()
                     container_list.id = "containers"
                     yield container_list
-            yield Footer()
+            status_bar = StatusBar()
+            status_bar.id = "status_bar"
+            yield status_bar
+            footer = Footer()
+            footer.id = "footer"
+            yield footer
         except Exception as e:
             logger.error(f"Error during composition: {str(e)}", exc_info=True)
             raise
@@ -216,6 +241,9 @@ class DockerViewApp(App):
             # Get references to our widgets after they're mounted using IDs
             self.container_list = self.query_one("#containers", ContainerList)
             self.error_display = self.query_one("#error", ErrorDisplay)
+            self.footer = self.query_one("#footer", Footer)
+            self.status_bar = self.query_one("#status_bar", StatusBar)
+
             # Start the auto-refresh timer with a longer interval
             self.refresh_timer = self.set_interval(5.0, self.action_refresh)
             # Trigger initial refresh immediately
