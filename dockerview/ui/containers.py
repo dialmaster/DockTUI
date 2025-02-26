@@ -1,4 +1,5 @@
 import logging
+import time
 from textual.widgets import DataTable, Static
 from textual.binding import Binding
 from textual.containers import VerticalScroll, Container
@@ -210,51 +211,143 @@ class ContainerList(VerticalScroll):
 
     def begin_update(self) -> None:
         """Begin a batch update to prevent UI flickering during data updates."""
+        logger.info("[PERF] ContainerList.begin_update() started")
+        start_time = time.time()
+
         self._is_updating = True
+        # Only set pending_clear if we have no children yet
         self._pending_clear = len(self.children) == 0
 
+        # Clear all tables to ensure fresh data
+        clear_tables_start = time.time()
         for table in self.stack_tables.values():
             table.clear()
+        clear_tables_end = time.time()
+        logger.info(f"[PERF] Clearing tables took {clear_tables_end - clear_tables_start:.3f}s")
+
+        # Clear the container_rows tracking dictionary to ensure we properly update all containers
         self.container_rows.clear()
+
+        end_time = time.time()
+        logger.info(f"[PERF] ContainerList.begin_update() completed in {end_time - start_time:.3f}s")
 
     def end_update(self) -> None:
         """End a batch update and apply pending changes to the UI."""
-        try:
-            if self._pending_clear:
-                self.clear()
-                self._pending_clear = False
+        logger.info("[PERF] ContainerList.end_update() started")
+        start_time = time.time()
 
-            stack_containers = {}
+        try:
+            # First, determine what needs to be added, updated, or removed
+            prepare_start = time.time()
+
+            # Track existing and new stack containers
+            existing_stack_containers = {}
+            new_stack_containers = {}
+
+            # Find all existing stack containers in the UI
+            if not self._pending_clear:
+                for child in self.children:
+                    if isinstance(child, Container) and "stack-container" in child.classes:
+                        # Find the stack name by looking at the header
+                        for widget in child.children:
+                            if isinstance(widget, StackHeader):
+                                existing_stack_containers[widget.stack_name] = child
+                                break
+
+            # Prepare all new containers that need to be added
             for stack_name in sorted(self.stack_headers.keys()):
                 header = self.stack_headers[stack_name]
                 table = self.stack_tables[stack_name]
 
-                if not header.parent: # Only mount if not already mounted
-                    stack_container = Container(classes="stack-container") # Create a new container
-                    stack_containers[stack_name] = (stack_container, header, table)
-                    self.mount(stack_containers[stack_name][0])
-                    logger.info(f"Mounting stack container for {stack_name} for header {header.stack_name} and {header.config_file}")
+                # If this stack is not already in the UI, prepare it for mounting
+                if stack_name not in existing_stack_containers:
+                    stack_container = Container(classes="stack-container")
+                    new_stack_containers[stack_name] = (stack_container, header, table)
+
+            prepare_end = time.time()
+            logger.info(f"[PERF] Preparing containers took {prepare_end - prepare_start:.3f}s")
+
+            # If we need to clear everything, do it all at once
+            if self._pending_clear:
+                clear_start = time.time()
+                self.remove_children()
+                clear_end = time.time()
+                logger.info(f"[PERF] Clearing ContainerList took {clear_end - clear_start:.3f}s")
+                self._pending_clear = False
+
+                # Mount all containers at once
+                mount_start = time.time()
+                for stack_name, (stack_container, header, table) in new_stack_containers.items():
+                    self.mount(stack_container)
+                    stack_container.mount(header)
+                    stack_container.mount(table)
+                    table.styles.display = "block" if header.expanded else "none"
+                mount_end = time.time()
+                logger.info(f"[PERF] Mounting {len(new_stack_containers)} containers took {mount_end - mount_start:.3f}s")
+            else:
+                # Update existing containers and add new ones
+                update_start = time.time()
+
+                # First update all existing containers (in place)
+                for stack_name, container in existing_stack_containers.items():
+                    if stack_name in self.stack_headers:
+                        # Update the header and table display state
+                        header = self.stack_headers[stack_name]
+                        table = self.stack_tables[stack_name]
+
+                        # Find the existing header and table in the container
+                        for widget in container.children:
+                            if isinstance(widget, StackHeader):
+                                # Update header content without remounting
+                                widget._update_content()
+                            elif isinstance(widget, DataTable):
+                                # Update table display state
+                                widget.styles.display = "block" if header.expanded else "none"
+                    else:
+                        # This stack no longer exists, remove it
+                        container.remove()
+
+                # Then add any new containers
+                for stack_name, (stack_container, header, table) in new_stack_containers.items():
+                    self.mount(stack_container)
                     stack_container.mount(header)
                     stack_container.mount(table)
                     table.styles.display = "block" if header.expanded else "none"
 
-                # Restore focus if needed
-                if self.current_focus:
-                    if self.current_focus in self.stack_headers:
-                        self.stack_headers[self.current_focus].focus()
-                    elif self.current_focus in self.stack_tables:
-                        self.stack_tables[self.current_focus].focus()
+                update_end = time.time()
+                logger.info(f"[PERF] Updating containers took {update_end - update_start:.3f}s")
+
+            # Restore focus if needed
+            focus_start = time.time()
+            if self.current_focus:
+                if self.current_focus in self.stack_headers:
+                    self.stack_headers[self.current_focus].focus()
+                elif self.current_focus in self.stack_tables:
+                    self.stack_tables[self.current_focus].focus()
+            focus_end = time.time()
+            logger.info(f"[PERF] Restoring focus took {focus_end - focus_start:.3f}s")
 
             self._is_updating = False
         finally:
+            refresh_start = time.time()
             if len(self.children) > 0:
+                logger.info("[PERF] About to call self.refresh()")
                 self.refresh()
+                logger.info("[PERF] self.refresh() completed")
+            refresh_end = time.time()
+            logger.info(f"[PERF] Final refresh took {refresh_end - refresh_start:.3f}s")
+
             self._is_updating = False
+            end_time = time.time()
+            logger.info(f"[PERF] ContainerList.end_update() completed in {end_time - start_time:.3f}s")
 
     def clear(self) -> None:
         """Clear all stacks and containers while preserving expansion states."""
-        logger.info("Clearing ContainerList")
+        logger.info("[PERF] ContainerList.clear() started")
+        start_time = time.time()
+
         # Save expanded states before clearing
+        save_state_start = time.time()
         self.expanded_stacks = {
             name for name, header in self.stack_headers.items()
             if header.expanded
@@ -265,12 +358,20 @@ class ContainerList(VerticalScroll):
             self.current_focus = next(name for name, header in self.stack_headers.items() if header == focused)
         elif focused in self.stack_tables.values():
             self.current_focus = next(name for name, table in self.stack_tables.items() if table == focused)
+        save_state_end = time.time()
+        logger.info(f"[PERF] Saving state took {save_state_end - save_state_start:.3f}s")
 
         # Clear all widgets
+        clear_start = time.time()
         self.stack_tables.clear()
         self.stack_headers.clear()
         self.container_rows.clear()  # Clear container row tracking
         self.remove_children()
+        clear_end = time.time()
+        logger.info(f"[PERF] Clearing widgets took {clear_end - clear_start:.3f}s")
+
+        end_time = time.time()
+        logger.info(f"[PERF] ContainerList.clear() completed in {end_time - start_time:.3f}s")
 
     def add_stack(self, name: str, config_file: str, running: int, exited: int, total: int) -> None:
         """Add or update a stack section in the container list.
@@ -282,7 +383,6 @@ class ContainerList(VerticalScroll):
             exited: Number of exited containers
             total: Total number of containers
         """
-
         if name not in self.stack_tables:
             header = StackHeader(name, config_file, running, exited, total)
             table = self.create_stack_table(name)
@@ -296,12 +396,15 @@ class ContainerList(VerticalScroll):
 
             # Create and mount the container immediately unless we're in a batch update
             if not self._is_updating:
+                mount_start = time.time()
                 stack_container = Container(classes="stack-container")
                 self.mount(stack_container)
                 stack_container.mount(header)
                 stack_container.mount(table)
                 # Ensure proper display state
                 table.styles.display = "block" if header.expanded else "none"
+                mount_end = time.time()
+                logger.info(f"[PERF] Mounting single stack {name} took {mount_end - mount_start:.3f}s")
         else:
             header = self.stack_headers[name]
             was_expanded = header.expanded
@@ -339,17 +442,55 @@ class ContainerList(VerticalScroll):
         )
 
         try:
-            row_key = table.row_count
-            table.add_row(*row_data)
-            self.container_rows[container_id] = (stack_name, row_key)
+            # Since we clear container_rows at the beginning of each update cycle,
+            # we'll always be adding new rows during a refresh
+            if self._is_updating:
+                # Add as a new row
+                row_key = table.row_count
+                table.add_row(*row_data)
+                self.container_rows[container_id] = (stack_name, row_key)
+            else:
+                # For individual updates outside of a batch update cycle,
+                # check if this container already exists in the table
+                if container_id in self.container_rows:
+                    existing_stack, existing_row = self.container_rows[container_id]
+
+                    # If the container moved to a different stack, remove it from the old one
+                    if existing_stack != stack_name and existing_stack in self.stack_tables:
+                        old_table = self.stack_tables[existing_stack]
+                        try:
+                            old_table.remove_row(existing_row)
+                            # Update row indices for containers after this one
+                            for cid, (cstack, crow) in list(self.container_rows.items()):
+                                if cstack == existing_stack and crow > existing_row:
+                                    self.container_rows[cid] = (cstack, crow - 1)
+                        except Exception as e:
+                            logger.error(f"Error removing container {container_id} from old stack: {str(e)}", exc_info=True)
+
+                        # Add to the new stack
+                        row_key = table.row_count
+                        table.add_row(*row_data)
+                        self.container_rows[container_id] = (stack_name, row_key)
+                    else:
+                        # Update the existing row in the same stack
+                        try:
+                            for col_idx, value in enumerate(row_data):
+                                table.update_cell(existing_row, col_idx, value)
+                        except Exception as e:
+                            logger.error(f"Error updating container {container_id}: {str(e)}", exc_info=True)
+                else:
+                    # Add as a new row
+                    row_key = table.row_count
+                    table.add_row(*row_data)
+                    self.container_rows[container_id] = (stack_name, row_key)
 
         except Exception as e:
             logger.error(f"Error adding container {container_id}: {str(e)}", exc_info=True)
             return
 
-
         if self._is_updating and self._pending_clear:
             try:
+                mount_start = time.time()
                 stack_containers = {}
                 for stack_name in sorted(self.stack_headers.keys()):
                     header = self.stack_headers[stack_name]
@@ -370,9 +511,10 @@ class ContainerList(VerticalScroll):
                         self.stack_headers[self.current_focus].focus()
                     elif self.current_focus in self.stack_tables:
                         self.stack_tables[self.current_focus].focus()
+                mount_end = time.time()
+                logger.info(f"[PERF] Emergency mounting of all stacks took {mount_end - mount_start:.3f}s")
             except Exception as e:
                 logger.error(f"Error mounting widgets: {str(e)}", exc_info=True)
-
 
     def action_toggle_stack(self) -> None:
         """Toggle the visibility of the selected stack's container table."""

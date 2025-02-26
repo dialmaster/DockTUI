@@ -11,6 +11,7 @@ import asyncio
 from typing import Tuple, Dict, List
 import sys
 import os
+import time
 from pathlib import Path
 
 from dockerview.ui.containers import ContainerList
@@ -26,13 +27,13 @@ def setup_logging():
     Returns:
         Path: Path to the log file, or None if logging is disabled
     """
-    # Check if debug mode is enabled
-    if not os.environ.get('DOCKERVIEW_DEBUG'):
+    # Check if debug mode is enabled (env var must be "1")
+    if os.environ.get('DOCKERVIEW_DEBUG') != "1":
         # Disable all logging
         logging.getLogger().setLevel(logging.CRITICAL)
         return None
 
-    log_dir = Path.home() / '.dockerview' / 'logs'
+    log_dir = Path('./logs')
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / 'dockerview.log'
 
@@ -55,6 +56,9 @@ log_file = setup_logging()
 logger = logging.getLogger('dockerview')
 if log_file:  # Only log if debug mode is enabled
     logger.info(f"Logging initialized. Log file: {log_file}")
+
+# Flag to track if we've completed one refresh cycle in debug mode
+DEBUG_REFRESH_COMPLETED = False
 
 class ErrorDisplay(Static):
     """A widget that displays error messages with error styling.
@@ -168,17 +172,14 @@ class DockerViewApp(App):
 
     def __init__(self):
         """Initialize the application and Docker manager."""
-        logger.info("Starting DockerViewApp initialization")
         try:
             super().__init__(driver_class=None)
-            logger.info("After super().__init__()")
             self.docker = DockerManager()
-            logger.info("Created DockerManager")
             self.container_list: ContainerList | None = None
             self.error_display: ErrorDisplay | None = None
             self.refresh_timer: Timer | None = None
             self._current_worker: Worker | None = None
-            logger.info("Finished DockerViewApp initialization")
+            self._refresh_count = 0
         except Exception as e:
             logger.error(f"Error during initialization: {str(e)}", exc_info=True)
             raise
@@ -189,26 +190,18 @@ class DockerViewApp(App):
         Returns:
             ComposeResult: The composed widget tree
         """
-        logger.info("Starting composition")
         try:
             yield Header()
-            logger.info("Added header")
             yield Instructions()
             with Container():
                 with Vertical():
                     error = ErrorDisplay()
                     error.id = "error"
                     yield error
-                    logger.info("Added error display")
-                    logger.info("About to create ContainerList")
                     container_list = ContainerList()
-                    logger.info("Created ContainerList")
                     container_list.id = "containers"
                     yield container_list
-                    logger.info("Added container list")
             yield Footer()
-            logger.info("Added footer")
-            logger.info("Finished composition")
         except Exception as e:
             logger.error(f"Error during composition: {str(e)}", exc_info=True)
             raise
@@ -218,7 +211,6 @@ class DockerViewApp(App):
 
         Initializes the container list, error display, and starts the auto-refresh timer.
         """
-        logger.info("Starting mount")
         try:
             self.title = "Docker Container Monitor"
             # Get references to our widgets after they're mounted using IDs
@@ -228,33 +220,9 @@ class DockerViewApp(App):
             self.refresh_timer = self.set_interval(5.0, self.action_refresh)
             # Trigger initial refresh immediately
             self.call_after_refresh(self.action_refresh)
-            logger.info("Finished mount")
         except Exception as e:
             logger.error(f"Error during mount: {str(e)}", exc_info=True)
             raise
-
-    async def on_load(self) -> None:
-        """Called when the app is first loaded."""
-        logger.info("App load event triggered")
-
-    async def on_show(self) -> None:
-        """Called when the app screen is shown."""
-        logger.info("App screen is now visible")
-
-    async def on_ready(self) -> None:
-        """Called when the app is ready to start processing events."""
-        logger.info("App is ready to process events")
-        try:
-            # Force a screen update
-            self.refresh(layout=True)
-            logger.info("Forced initial screen refresh")
-        except Exception as e:
-            logger.error(f"Error in on_ready: {str(e)}", exc_info=True)
-            raise
-
-    def watch_app_state(self, old_state: str, new_state: str) -> None:
-        """Watch for app state changes."""
-        logger.info(f"App state changed from {old_state} to {new_state}")
 
     def action_quit(self) -> None:
         """Handle the quit action by stopping the refresh timer and exiting."""
@@ -264,39 +232,12 @@ class DockerViewApp(App):
 
     def action_refresh(self) -> None:
         """Trigger an asynchronous refresh of the container list."""
-        logger.info("Refresh action triggered")
+        logger.info("=== REFRESH ACTION TRIGGERED ===")
         try:
             # Use call_after_refresh to ensure we're in the right context
             self.call_after_refresh(self.refresh_containers)
-            logger.info("Scheduled refresh_containers call")
         except Exception as e:
             logger.error(f"Error scheduling refresh: {str(e)}", exc_info=True)
-
-    @work(thread=True)
-    def _refresh_containers_worker(self) -> Tuple[Dict, List]:
-        """Worker function to fetch container and stack data in a background thread.
-
-        Returns:
-            Tuple[Dict, List]: A tuple containing:
-                - Dict: Mapping of stack names to stack information
-                - List: List of container information dictionaries
-        """
-        logger.info("Starting container refresh in thread")
-        try:
-            # Get stacks and containers in the thread
-            logger.debug("About to fetch compose stacks")
-            stacks = self.docker.get_compose_stacks()
-            logger.debug(f"Got stacks: {stacks}")
-
-            logger.debug("About to fetch containers")
-            containers = self.docker.get_containers()
-            logger.debug(f"Got containers: {containers}")
-
-            logger.info(f"Worker completed successfully - Found {len(stacks)} stacks and {len(containers)} containers")
-            return stacks, containers
-        except Exception as e:
-            logger.error(f"Error in refresh worker: {str(e)}", exc_info=True)
-            return {}, []
 
     async def refresh_containers(self) -> None:
         """Refresh the container list asynchronously.
@@ -304,39 +245,108 @@ class DockerViewApp(App):
         Fetches updated container and stack information in a background thread,
         then updates the UI with the new data.
         """
-        logger.info("Starting container refresh")
+        global DEBUG_REFRESH_COMPLETED
+
+        refresh_start = time.time()
+        logger.info("[PERF] ====== REFRESH CYCLE STARTED ======")
+
         if not all([self.container_list, self.error_display]):
-            logger.error("[REFRESH] Error: Widgets not properly initialized")
+            logger.error("Error: Widgets not properly initialized")
             return
 
         try:
-            # Run the refresh in a thread worker
-            logger.info("[REFRESH] Creating new worker")
-            worker = self._refresh_containers_worker()
-            logger.info("[REFRESH] Worker created, waiting for results")
+            # Show loading indicator in the title
+            self.title = "Docker Container Monitor - Refreshing..."
 
-            try:
-                stacks, containers = await worker.wait()
-                logger.info(f"[REFRESH] Got results from worker - Stacks: {len(stacks)}, Containers: {len(containers)}")
-            except Exception as worker_error:
-                logger.error(f"[REFRESH] Worker failed: {str(worker_error)}", exc_info=True)
-                raise
+            # Start the worker but don't block waiting for it
+            # Textual's worker pattern will call the function and then process the results
+            # when they're ready without blocking the UI
+            self._refresh_containers_worker(self._handle_refresh_results)
 
+        except Exception as e:
+            logger.error(f"Error during refresh: {str(e)}", exc_info=True)
+            self.error_display.update(f"Error refreshing: {str(e)}")
+
+    @work(thread=True)
+    def _refresh_containers_worker(self, callback) -> Tuple[Dict, List]:
+        """Worker function to fetch container and stack data in a background thread.
+
+        Args:
+            callback: Function to call with the results when complete
+
+        Returns:
+            Tuple[Dict, List]: A tuple containing:
+                - Dict: Mapping of stack names to stack information
+                - List: List of container information dictionaries
+        """
+        start_time = time.time()
+        logger.info("[PERF] Starting container data fetch in thread")
+        try:
+            # Get stacks and containers in the thread
+            stacks_start = time.time()
+            stacks = self.docker.get_compose_stacks()
+            stacks_end = time.time()
+            logger.info(f"[PERF] get_compose_stacks took {stacks_end - stacks_start:.3f}s")
+
+            containers_start = time.time()
+            containers = self.docker.get_containers()
+            containers_end = time.time()
+            logger.info(f"[PERF] get_containers took {containers_end - containers_start:.3f}s")
+
+            end_time = time.time()
+            logger.info(f"[PERF] Total worker time: {end_time - start_time:.3f}s - Found {len(stacks)} stacks and {len(containers)} containers")
+
+            # Call the callback with the results
+            # This will be executed in the main thread after the worker completes
+            self.call_from_thread(callback, stacks, containers)
+
+            return stacks, containers
+        except Exception as e:
+            logger.error(f"Error in refresh worker: {str(e)}", exc_info=True)
+            self.call_from_thread(self.error_display.update, f"Error refreshing: {str(e)}")
+            return {}, []
+
+    def _handle_refresh_results(self, stacks, containers):
+        """Handle the results from the refresh worker when they're ready.
+
+        Args:
+            stacks: Dictionary of stack information
+            containers: List of container information
+        """
+        try:
             # Update UI with the results
             if hasattr(self.docker, 'last_error') and self.docker.last_error:
-                logger.error(f"[REFRESH] Docker error: {self.docker.last_error}")
                 self.error_display.update(f"Error: {self.docker.last_error}")
             else:
                 self.error_display.update("")
 
-            # Start batch update
-            logger.info("[REFRESH] Beginning container list update")
+            # Schedule the UI update to run asynchronously
+            asyncio.create_task(self._update_ui_with_results(stacks, containers))
+
+        except Exception as e:
+            logger.error(f"Error handling refresh results: {str(e)}", exc_info=True)
+            self.error_display.update(f"Error refreshing: {str(e)}")
+
+    async def _update_ui_with_results(self, stacks, containers):
+        """Update the UI with the results from the refresh worker.
+
+        Args:
+            stacks: Dictionary of stack information
+            containers: List of container information
+        """
+        global DEBUG_REFRESH_COMPLETED
+
+        ui_update_start = time.time()
+        logger.info("[PERF] Starting UI update")
+
+        try:
+            # Begin a batch update to prevent UI flickering
             self.container_list.begin_update()
 
             try:
-                # Add stacks first
+                # Process all stacks first
+                stacks_update_start = time.time()
                 for stack_name, stack_info in stacks.items():
-                    logger.info(f"[REFRESH] Adding stack: {stack_name}")
                     self.container_list.add_stack(
                         stack_name,
                         stack_info['config_file'],
@@ -344,47 +354,62 @@ class DockerViewApp(App):
                         stack_info['exited'],
                         stack_info['total']
                     )
-                    # Small yield to keep UI responsive
-                    await asyncio.sleep(0)
+                stacks_update_end = time.time()
+                logger.info(f"[PERF] Adding {len(stacks)} stacks took {stacks_update_end - stacks_update_start:.3f}s")
 
-                # Add containers to their respective stacks
-                logger.info(f"[REFRESH] Adding {len(containers)} containers to stacks")
-                for container in containers:
-                    logger.info(f"[REFRESH] Adding container to stack {container['stack']}: {container.get('name', 'unnamed')}")
+                # Process all containers in a single batch
+                containers_update_start = time.time()
+                # Sort containers by stack to minimize UI updates
+                sorted_containers = sorted(containers, key=lambda c: c["stack"])
+                for container in sorted_containers:
                     self.container_list.add_container_to_stack(
                         container["stack"],
                         container
                     )
-                    # Small yield to keep UI responsive
-                    await asyncio.sleep(0)
+                containers_update_end = time.time()
+                logger.info(f"[PERF] Adding {len(containers)} containers took {containers_update_end - containers_update_start:.3f}s")
 
             finally:
                 # Always end the update, even if cancelled
-                logger.info("[REFRESH] Ending container list update")
+                end_update_start = time.time()
+                logger.info("[PERF] Calling end_update()")
                 self.container_list.end_update()
+                end_update_end = time.time()
+                logger.info(f"[PERF] end_update() took {end_update_end - end_update_start:.3f}s")
+
+            ui_update_end = time.time()
+            logger.info(f"[PERF] Total UI update time: {ui_update_end - ui_update_start:.3f}s")
 
             # Update title with summary
             total_running = sum(s['running'] for s in stacks.values())
             total_exited = sum(s['exited'] for s in stacks.values())
             total_stacks = len(stacks)
 
-            logger.info(f"[REFRESH] Updating title - Stacks: {total_stacks}, Running: {total_running}, Exited: {total_exited}")
             # Update the app title with stats
             self.title = f"Docker Container Monitor - {total_stacks} Stacks, {total_running} Running, {total_exited} Exited"
 
+            refresh_end = time.time()
+            logger.info(f"[PERF] ====== REFRESH CYCLE COMPLETED in {refresh_end - ui_update_start:.3f}s ======")
+
+            # Increment refresh count
+            self._refresh_count += 1
+
+            # Exit after one refresh cycle if in debug mode
+            if os.environ.get('DOCKERVIEW_DEBUG') == "1" and not DEBUG_REFRESH_COMPLETED:
+                logger.info("Debug mode: Exiting after one refresh cycle")
+                DEBUG_REFRESH_COMPLETED = True
+                # Use call_later to allow the UI to update before exiting
+                self.call_later(self.action_quit)
+
         except Exception as e:
-            logger.error(f"[REFRESH] Error during refresh: {str(e)}", exc_info=True)
-            self.error_display.update(f"Error refreshing: {str(e)}")
+            logger.error(f"Error during UI update: {str(e)}", exc_info=True)
+            self.error_display.update(f"Error updating UI: {str(e)}")
 
 def main():
     """Run the Docker container monitoring application."""
-    logger.info("Starting application")
     try:
         app = DockerViewApp()
-        logger.info("Created DockerViewApp instance")
-        logger.info("About to run app")
         app.run()
-        logger.info("App.run() completed")
     except Exception as e:
         logger.error(f"Error running app: {str(e)}", exc_info=True)
         raise
