@@ -7,6 +7,7 @@ from textual.widget import Widget
 from rich.text import Text
 from rich.style import Style
 from rich.console import RenderableType
+from textual.message import Message
 
 logger = logging.getLogger('dockerview.containers')
 
@@ -46,6 +47,18 @@ class StackHeader(Static):
         text-style: bold;
     }
     """
+
+    class Selected(Message):
+        """Event emitted when the header is selected."""
+        def __init__(self, stack_header: "StackHeader") -> None:
+            self.stack_header = stack_header
+            super().__init__()
+
+    class Clicked(Message):
+        """Event emitted when the header is clicked."""
+        def __init__(self, stack_header: "StackHeader") -> None:
+            self.stack_header = stack_header
+            super().__init__()
 
     def __init__(self, stack_name: str, config_file: str, running: int, exited: int, total: int):
         """Initialize the stack header.
@@ -93,6 +106,8 @@ class StackHeader(Static):
     def on_focus(self) -> None:
         """Called when the header gets focus."""
         self.refresh()
+        # Emit a selected event when focused
+        self.post_message(self.Selected(self))
 
     def on_blur(self) -> None:
         """Called when the header loses focus."""
@@ -107,6 +122,9 @@ class StackHeader(Static):
         """Handle click events for double-click detection."""
         import time
         current_time = time.time()
+
+        # Emit a clicked event
+        self.post_message(self.Clicked(self))
 
         if current_time - self._last_click_time < 0.5:
             self.focus()
@@ -187,6 +205,11 @@ class ContainerList(VerticalScroll):
             self.expanded_stacks = set()  # Keep track of which stacks are expanded
             self._is_updating = False  # Track if we're in a batch update
             self._pending_clear = False  # Track if we need to clear during batch update
+
+            # Selection tracking
+            self.selected_item = None  # Will store either ("stack", stack_name) or ("container", container_id)
+            self.selected_container_data = None  # Will store container data if a container is selected
+            self.selected_stack_data = None  # Will store stack data if a stack is selected
         except Exception as e:
             logger.error(f"Error during ContainerList initialization: {str(e)}", exc_info=True)
             raise
@@ -207,6 +230,10 @@ class ContainerList(VerticalScroll):
         table.cursor_type = "row"
         table.display = False  # Start collapsed
         table.can_focus = True
+
+        # Add event handler for cursor movement
+        table.watch_cursor = True
+
         return table
 
     def begin_update(self) -> None:
@@ -317,15 +344,11 @@ class ContainerList(VerticalScroll):
                 update_end = time.time()
                 logger.info(f"[PERF] Updating containers took {update_end - update_start:.3f}s")
 
-            # Restore focus if needed
+            # Restore selection and focus
             focus_start = time.time()
-            if self.current_focus:
-                if self.current_focus in self.stack_headers:
-                    self.stack_headers[self.current_focus].focus()
-                elif self.current_focus in self.stack_tables:
-                    self.stack_tables[self.current_focus].focus()
+            self._restore_selection()
             focus_end = time.time()
-            logger.info(f"[PERF] Restoring focus took {focus_end - focus_start:.3f}s")
+            logger.info(f"[PERF] Restoring selection and focus took {focus_end - focus_start:.3f}s")
 
             self._is_updating = False
         finally:
@@ -340,6 +363,43 @@ class ContainerList(VerticalScroll):
             self._is_updating = False
             end_time = time.time()
             logger.info(f"[PERF] ContainerList.end_update() completed in {end_time - start_time:.3f}s")
+
+    def _restore_selection(self) -> None:
+        """Restore the previously selected item after a refresh."""
+        try:
+            if self.selected_item is None:
+                # No selection to restore
+                return
+
+            item_type, item_id = self.selected_item
+
+            if item_type == "stack" and item_id in self.stack_headers:
+                # Restore stack selection
+                header = self.stack_headers[item_id]
+                header.focus()
+                # Update footer with current selection
+                self._update_footer_with_selection()
+
+            elif item_type == "container" and item_id in self.container_rows:
+                # Restore container selection
+                stack_name, row_idx = self.container_rows[item_id]
+                if stack_name in self.stack_tables:
+                    table = self.stack_tables[stack_name]
+                    header = self.stack_headers[stack_name]
+
+                    # Make sure the stack is expanded
+                    if not header.expanded:
+                        header.expanded = True
+                        table.styles.display = "block"
+                        header._update_content()
+
+                    # Focus and select the container row
+                    table.focus()
+                    table.move_cursor(row=row_idx)
+                    # Update footer with current selection
+                    self._update_footer_with_selection()
+        except Exception as e:
+            logger.error(f"Error restoring selection: {str(e)}", exc_info=True)
 
     def clear(self) -> None:
         """Clear all stacks and containers while preserving expansion states."""
@@ -405,6 +465,16 @@ class ContainerList(VerticalScroll):
                 table.styles.display = "block" if header.expanded else "none"
                 mount_end = time.time()
                 logger.info(f"[PERF] Mounting single stack {name} took {mount_end - mount_start:.3f}s")
+
+            # Update selected stack data if this is the selected stack
+            if self.selected_item and self.selected_item[0] == "stack" and self.selected_item[1] == name:
+                self.selected_stack_data = {
+                    "name": name,
+                    "config_file": config_file,
+                    "running": running,
+                    "exited": exited,
+                    "total": total
+                }
         else:
             header = self.stack_headers[name]
             was_expanded = header.expanded
@@ -415,6 +485,16 @@ class ContainerList(VerticalScroll):
             header.expanded = was_expanded
             self.stack_tables[name].styles.display = "block" if was_expanded else "none"
             header._update_content()
+
+            # Update selected stack data if this is the selected stack
+            if self.selected_item and self.selected_item[0] == "stack" and self.selected_item[1] == name:
+                self.selected_stack_data = {
+                    "name": name,
+                    "config_file": config_file,
+                    "running": running,
+                    "exited": exited,
+                    "total": total
+                }
 
     def add_container_to_stack(self, stack_name: str, container_data: dict) -> None:
         """Add or update a container in its stack's table.
@@ -440,6 +520,10 @@ class ContainerList(VerticalScroll):
             container_data["memory"],
             pids_display
         )
+
+        # Update selected container data if this is the selected container
+        if self.selected_item and self.selected_item[0] == "container" and self.selected_item[1] == container_id:
+            self.selected_container_data = container_data
 
         try:
             # Since we clear container_rows at the beginning of each update cycle,
@@ -542,6 +626,120 @@ class ContainerList(VerticalScroll):
             logger.error(f"Error during ContainerList mount: {str(e)}", exc_info=True)
             raise
 
+    def select_stack(self, stack_name: str) -> None:
+        """Select a stack and update the footer.
+
+        Args:
+            stack_name: Name of the stack to select
+        """
+        if stack_name in self.stack_headers:
+            # Clear any previous selection
+            self.selected_item = ("stack", stack_name)
+            self.selected_container_data = None
+
+            # Store stack data for footer display
+            header = self.stack_headers[stack_name]
+            self.selected_stack_data = {
+                "name": stack_name,
+                "config_file": header.config_file,
+                "running": header.running,
+                "exited": header.exited,
+                "total": header.total
+            }
+
+            # Update the footer
+            self._update_footer_with_selection()
+
+    def select_container(self, container_id: str) -> None:
+        """Select a container and update the footer.
+
+        Args:
+            container_id: ID of the container to select
+        """
+        if container_id in self.container_rows:
+            # Clear any previous selection
+            self.selected_item = ("container", container_id)
+            self.selected_stack_data = None
+
+            # Find the container data
+            stack_name, row_idx = self.container_rows[container_id]
+            table = self.stack_tables[stack_name]
+
+            # Get container data from the table
+            container_data = {
+                "id": table.get_cell_at(row_idx, 0),
+                "name": table.get_cell_at(row_idx, 1),
+                "status": table.get_cell_at(row_idx, 2),
+                "cpu": table.get_cell_at(row_idx, 3),
+                "memory": table.get_cell_at(row_idx, 4),
+                "pids": table.get_cell_at(row_idx, 5),
+                "stack": stack_name
+            }
+
+            self.selected_container_data = container_data
+
+            # Update the footer
+            self._update_footer_with_selection()
+
+    def _update_footer_with_selection(self) -> None:
+        """Update the footer with the current selection information."""
+        if self.screen is None:
+            return
+
+        try:
+            status_bar = self.screen.query_one("#status_bar")
+
+            if self.selected_item is None:
+                # Clear the status bar
+                status_bar.update("No selection")
+                return
+
+            item_type, item_id = self.selected_item
+
+            if item_type == "stack" and self.selected_stack_data:
+                stack_data = self.selected_stack_data
+                selection_text = f"Currently selected: docker compose stack with config \"{stack_data['config_file']}\" and name \"{stack_data['name']}\""
+                status_bar.update(selection_text)
+
+            elif item_type == "container" and self.selected_container_data:
+                container_data = self.selected_container_data
+                selection_text = f"Currently selected: docker container with ID \"{container_data['id']}\" and name \"{container_data['name']}\""
+                status_bar.update(selection_text)
+
+            else:
+                # Clear the status bar if no valid selection
+                status_bar.update("No selection")
+
+        except Exception as e:
+            logger.error(f"Error updating status bar: {str(e)}", exc_info=True)
+
+    def on_data_table_cell_selected(self, event) -> None:
+        """Handle DataTable cell selection events."""
+        table = event.sender
+
+        # Find which stack this table belongs to
+        for stack_name, stack_table in self.stack_tables.items():
+            if stack_table == table:
+                # Get the container ID from the first column
+                try:
+                    row = table.cursor_row
+                    if row is not None and row < table.row_count:
+                        container_id = table.get_cell_at(row, 0)
+                        self.select_container(container_id)
+                except Exception as e:
+                    logger.error(f"Error handling table selection: {str(e)}", exc_info=True)
+                break
+
+    def on_stack_header_selected(self, event) -> None:
+        """Handle StackHeader selection events."""
+        header = event.stack_header
+        self.select_stack(header.stack_name)
+
+    def on_stack_header_clicked(self, event) -> None:
+        """Handle StackHeader click events."""
+        header = event.stack_header
+        self.select_stack(header.stack_name)
+
     def action_cursor_up(self) -> None:
         """Handle up arrow key."""
         current = self.screen.focused
@@ -549,9 +747,16 @@ class ContainerList(VerticalScroll):
             # If we're at the top of the table, focus the header
             if current.cursor_row == 0:
                 stack_name = next(name for name, table in self.stack_tables.items() if table == current)
-                self.stack_headers[stack_name].focus()
+                header = self.stack_headers[stack_name]
+                header.focus()
+                self.select_stack(stack_name)
             else:
                 current.action_cursor_up()
+                # Update selection based on new cursor position
+                row = current.cursor_row
+                stack_name = next(name for name, table in self.stack_tables.items() if table == current)
+                container_id = current.get_cell_at(row, 0)
+                self.select_container(container_id)
         elif isinstance(current, StackHeader):
             # Find previous visible widget
             current_idx = list(self.stack_headers.values()).index(current)
@@ -561,8 +766,12 @@ class ContainerList(VerticalScroll):
                 if prev_header.expanded and prev_table.row_count > 0:
                     prev_table.focus()
                     prev_table.move_cursor(row=prev_table.row_count - 1)
+                    # Update selection to the container
+                    container_id = prev_table.get_cell_at(prev_table.row_count - 1, 0)
+                    self.select_container(container_id)
                 else:
                     prev_header.focus()
+                    self.select_stack(prev_header.stack_name)
 
     def action_cursor_down(self) -> None:
         """Handle down arrow key."""
@@ -575,17 +784,45 @@ class ContainerList(VerticalScroll):
                 if next_header_idx < len(self.stack_headers):
                     next_header = list(self.stack_headers.values())[next_header_idx]
                     next_header.focus()
+                    self.select_stack(list(self.stack_headers.keys())[next_header_idx])
             else:
                 current.action_cursor_down()
+                # Update selection based on new cursor position
+                row = current.cursor_row
+                stack_name = next(name for name, table in self.stack_tables.items() if table == current)
+                container_id = current.get_cell_at(row, 0)
+                self.select_container(container_id)
         elif isinstance(current, StackHeader):
             # If expanded and has rows, focus the table
-            table = self.stack_tables[current.stack_name]
+            stack_name = current.stack_name
+            table = self.stack_tables[stack_name]
             if current.expanded and table.row_count > 0:
                 table.focus()
                 table.move_cursor(row=0)
+                # Update selection to the first container
+                container_id = table.get_cell_at(0, 0)
+                self.select_container(container_id)
             else:
                 # Focus next header
                 current_idx = list(self.stack_headers.values()).index(current)
                 if current_idx < len(self.stack_headers) - 1:
                     next_header = list(self.stack_headers.values())[current_idx + 1]
                     next_header.focus()
+                    self.select_stack(next_header.stack_name)
+
+    def on_data_table_cursor_moved(self, event) -> None:
+        """Handle DataTable cursor movement events to update selection."""
+        table = event.sender
+
+        # Find which stack this table belongs to
+        for stack_name, stack_table in self.stack_tables.items():
+            if stack_table == table:
+                # Get the container ID from the first column
+                try:
+                    row = table.cursor_row
+                    if row is not None and row < table.row_count:
+                        container_id = table.get_cell_at(row, 0)
+                        self.select_container(container_id)
+                except Exception as e:
+                    logger.error(f"Error handling table cursor movement: {str(e)}", exc_info=True)
+                break
