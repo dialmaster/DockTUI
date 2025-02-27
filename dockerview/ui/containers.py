@@ -225,7 +225,7 @@ class ContainerList(VerticalScroll):
         """
         table = DataTable()
         table.add_columns(
-            "ID", "Name", "Status", "CPU %", "Memory", "PIDs"
+            "ID", "Name", "Status", "CPU %", "Memory", "PIDs", "Ports"
         )
         table.cursor_type = "row"
         table.display = False  # Start collapsed
@@ -518,7 +518,8 @@ class ContainerList(VerticalScroll):
             container_data["status"],
             container_data["cpu"],
             container_data["memory"],
-            pids_display
+            pids_display,
+            container_data["ports"]
         )
 
         # Update selected container data if this is the selected container
@@ -673,6 +674,7 @@ class ContainerList(VerticalScroll):
                 "cpu": table.get_cell_at(row_idx, 3),
                 "memory": table.get_cell_at(row_idx, 4),
                 "pids": table.get_cell_at(row_idx, 5),
+                "ports": table.get_cell_at(row_idx, 6),
                 "stack": stack_name
             }
 
