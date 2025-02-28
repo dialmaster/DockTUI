@@ -149,6 +149,7 @@ class DockerManager:
                 - memory: Memory usage
                 - pids: Number of processes
                 - stack: Docker Compose stack name
+                - ports: Container port mappings
         """
         containers = []
         try:
@@ -176,7 +177,8 @@ class DockerManager:
                             "cpu": stats['cpu'],
                             "memory": stats['memory'],
                             "pids": stats['pids'],
-                            "stack": stack_name
+                            "stack": stack_name,
+                            "ports": self._format_ports(container)
                         }
                         containers.append(container_info)
                     except Exception as container_error:
@@ -198,15 +200,17 @@ class DockerManager:
             container: Docker container object
 
         Returns:
-            str: Formatted string of port mappings (e.g. "8080->80/tcp, 443->443/tcp")
+            str: Formatted string of port mappings (e.g. "8080->80, 443->443")
         """
         try:
-            ports = []
+            ports = set()  # Use a set to eliminate duplicates
             for port in container.ports.items():
                 if port[1]:
+                    # Extract the container port without the protocol suffix
+                    container_port = port[0].split('/')[0]
                     for binding in port[1]:
-                        ports.append(f"{binding['HostPort']}->{port[0]}")
-            return ", ".join(ports) if ports else ""
+                        ports.add(f"{binding['HostPort']}->{container_port}")
+            return ", ".join(sorted(ports)) if ports else ""
         except Exception as e:
             logger.error(f"Error formatting ports for container {container.short_id}: {str(e)}", exc_info=True)
             return ""
