@@ -102,8 +102,6 @@ class Instructions(Static):
         instructions = (
             "• To follow logs for a docker compose stack:   docker compose -f <STACK_CONFIG_FILE> logs -f\n"
             "• To follow logs for a container:              docker logs -f <CONTAINER_ID>\n"
-            "• To stop a docker compose stack:              docker compose -p <PROJECT_NAME> stop\n"
-            "• To start a docker compose stack:             docker compose -p <PROJECT_NAME> start\n"
         )
         super().__init__(instructions)
 
@@ -199,6 +197,9 @@ class DockerViewApp(App):
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),
+        Binding("s", "start", "Start Selected"),
+        Binding("t", "stop", "Stop Selected"),
+        Binding("e", "restart", "Restart Selected"),
     ]
 
     def __init__(self):
@@ -279,6 +280,64 @@ class DockerViewApp(App):
             self.call_after_refresh(self.refresh_containers)
         except Exception as e:
             logger.error(f"Error scheduling refresh: {str(e)}", exc_info=True)
+
+    def action_start(self) -> None:
+        """Start the selected container or stack."""
+        self._execute_docker_command("start")
+
+    def action_stop(self) -> None:
+        """Stop the selected container or stack."""
+        self._execute_docker_command("stop")
+
+    def action_restart(self) -> None:
+        """Restart the selected container or stack."""
+        self._execute_docker_command("restart")
+
+    def _execute_docker_command(self, command: str) -> None:
+        """Execute a Docker command on the selected item.
+
+        Args:
+            command: The command to execute (start, stop, restart)
+        """
+        if not self.container_list or not self.container_list.selected_item:
+            self.error_display.update(f"No item selected to {command}")
+            return
+
+        item_type, item_id = self.container_list.selected_item
+        success = False
+
+        try:
+            if item_type == "container":
+                # Execute command on container
+                success = self.docker.execute_container_command(item_id, command)
+                item_name = self.container_list.selected_container_data.get("name", item_id) if self.container_list.selected_container_data else item_id
+                message = f"{command.capitalize()}ing container: {item_name}"
+            elif item_type == "stack":
+                # Execute command on stack
+                if self.container_list.selected_stack_data:
+                    stack_name = self.container_list.selected_stack_data.get("name", item_id)
+                    config_file = self.container_list.selected_stack_data.get("config_file", "")
+                    success = self.docker.execute_stack_command(stack_name, config_file, command)
+                    message = f"{command.capitalize()}ing stack: {stack_name}"
+                else:
+                    self.error_display.update(f"Missing stack data for {item_id}")
+                    return
+            else:
+                self.error_display.update(f"Unknown item type: {item_type}")
+                return
+
+            if success:
+                # Show a temporary message in the error display
+                self.error_display.update(message)
+                # Schedule a refresh after a short delay to update the UI
+                self.set_timer(2, self.action_refresh)
+                # Schedule clearing the message after a few seconds
+                self.set_timer(3, lambda: self.error_display.update(""))
+            else:
+                self.error_display.update(f"Error {command}ing {item_type}: {self.docker.last_error}")
+        except Exception as e:
+            logger.error(f"Error executing {command} command: {str(e)}", exc_info=True)
+            self.error_display.update(f"Error executing {command}: {str(e)}")
 
     async def refresh_containers(self) -> None:
         """Refresh the container list asynchronously.
@@ -434,13 +493,6 @@ class DockerViewApp(App):
 
             # Increment refresh count
             self._refresh_count += 1
-
-            # Exit after one refresh cycle if in debug mode
-            if os.environ.get('DOCKERVIEW_DEBUG') == "1" and not DEBUG_REFRESH_COMPLETED:
-                logger.info("Debug mode: Exiting after one refresh cycle")
-                DEBUG_REFRESH_COMPLETED = True
-                # Use call_later to allow the UI to update before exiting
-                self.call_later(self.action_quit)
 
         except Exception as e:
             logger.error(f"Error during UI update: {str(e)}", exc_info=True)

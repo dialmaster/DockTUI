@@ -782,7 +782,8 @@ class ContainerList(VerticalScroll):
 
                 # Create a rich text object with styled components
                 selection_text = Text()
-                selection_text.append("Stack: ", Style(color="white"))
+                selection_text.append("Current Selection:", Style(color="black", bgcolor="yellow"))
+                selection_text.append("  Stack: ", Style(color="white"))
                 selection_text.append(f"{stack_data['name']}", Style(color="white", bold=True))
                 selection_text.append(" | ", Style(color="white"))
                 selection_text.append(f"Running: ", Style(color="white"))
@@ -804,7 +805,8 @@ class ContainerList(VerticalScroll):
 
                 # Create a rich text object with styled components
                 selection_text = Text()
-                selection_text.append("Container: ", Style(color="white"))
+                selection_text.append("Current Selection:", Style(color="black", bgcolor="yellow"))
+                selection_text.append("  Container: ", Style(color="white"))
                 selection_text.append(f"{container_data['name']}", Style(color="white", bold=True))
                 selection_text.append(" | ", Style(color="white"))
                 selection_text.append("Status: ", Style(color="white"))

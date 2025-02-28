@@ -214,3 +214,74 @@ class DockerManager:
         except Exception as e:
             logger.error(f"Error formatting ports for container {container.short_id}: {str(e)}", exc_info=True)
             return ""
+
+    def execute_container_command(self, container_id: str, command: str) -> bool:
+        """Execute a command on a specific container.
+
+        Args:
+            container_id: ID of the container to operate on
+            command: Command to execute (start, stop, restart)
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            logger.info(f"Executing container command: docker {command} {container_id}")
+
+            # Use Popen to run the command in the background
+            process = subprocess.Popen(
+                ['docker', command, container_id],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+
+            # We don't wait for the process to complete to keep the UI responsive
+            return True
+        except Exception as e:
+            error_msg = f"Error executing container command: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            self.last_error = error_msg
+            return False
+
+    def execute_stack_command(self, stack_name: str, config_file: str, command: str) -> bool:
+        """Execute a command on a Docker Compose stack.
+
+        Args:
+            stack_name: Name of the stack to operate on
+            config_file: Path to the compose configuration file
+            command: Command to execute (start, stop, restart)
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            logger.info(f"Executing stack command: docker compose -p {stack_name} {command}")
+
+            cmd = ['docker', 'compose']
+
+            # Add project name
+            cmd.extend(['-p', stack_name])
+
+            # Add config file if provided and not 'N/A'
+            #if config_file and config_file != 'N/A':
+            #    cmd.extend(['-f', config_file])
+
+            # Add the command
+            cmd.append(command)
+
+            # Use Popen to run the command in the background
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+
+            # We don't wait for the process to complete to keep the UI responsive
+            return True
+        except Exception as e:
+            error_msg = f"Error executing stack command: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            self.last_error = error_msg
+            return False
