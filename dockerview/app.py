@@ -112,18 +112,31 @@ class StatusBar(Static):
 
     DEFAULT_CSS = """
     StatusBar {
-        background: $surface-darken-1;
-        color: $text;
+        background: $panel;
+        color: $text-primary;
         height: 3;
         dock: bottom;
         padding: 0 1;
         text-align: center;
+        text-style: bold;
     }
     """
 
     def __init__(self):
         """Initialize the status bar with an empty message."""
-        super().__init__("No selection")
+        from rich.text import Text
+        from rich.style import Style
+        no_selection_text = Text("No selection", Style(color="white", bold=True))
+        super().__init__(no_selection_text)
+
+    def update(self, message: str) -> None:
+        """Update the status bar with a new message.
+
+        Args:
+            message: The message to display in the status bar (string or Rich Text object)
+        """
+        from rich.console import RenderableType
+        super().update(message)
 
 class DockerViewApp(App):
     """A Textual TUI application for monitoring Docker containers and stacks."""

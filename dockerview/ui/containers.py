@@ -185,6 +185,23 @@ class ContainerList(VerticalScroll):
         border: none;
         background: $surface;
     }
+
+    /* Make sure the cursor is visible and properly styled */
+    DataTable > .datatable--cursor {
+        background: $primary-darken-3;
+        color: $text;
+    }
+
+    DataTable:focus > .datatable--cursor {
+        background: $primary;
+        color: $text;
+    }
+
+    /* Style for row hover */
+    DataTable > .datatable--row:hover {
+        background: $primary-darken-2;
+        color: $text;
+    }
     """
 
     BINDINGS = [
@@ -227,12 +244,19 @@ class ContainerList(VerticalScroll):
         table.add_columns(
             "ID", "Name", "Status", "CPU %", "Memory", "PIDs", "Ports"
         )
-        table.cursor_type = "row"
+
+        # Configure cursor behavior
+        table.cursor_type = "row"  # Ensure we're using row selection
+
+        # Make sure the table is visible and can be interacted with
         table.display = False  # Start collapsed
         table.can_focus = True
 
-        # Add event handler for cursor movement
+        # Enable cursor and highlighting
+        table.show_cursor = True  # Always show cursor
         table.watch_cursor = True
+
+        logger.info(f"Created table for stack {stack_name} with cursor_type={table.cursor_type}, show_cursor={table.show_cursor}")
 
         return table
 
@@ -347,6 +371,10 @@ class ContainerList(VerticalScroll):
             # Restore selection and focus
             focus_start = time.time()
             self._restore_selection()
+
+            # Update cursor visibility based on the restored selection
+            self._update_cursor_visibility()
+
             focus_end = time.time()
             logger.info(f"[PERF] Restoring selection and focus took {focus_end - focus_start:.3f}s")
 
@@ -361,8 +389,9 @@ class ContainerList(VerticalScroll):
             logger.info(f"[PERF] Final refresh took {refresh_end - refresh_start:.3f}s")
 
             self._is_updating = False
-            end_time = time.time()
-            logger.info(f"[PERF] ContainerList.end_update() completed in {end_time - start_time:.3f}s")
+
+        end_time = time.time()
+        logger.info(f"[PERF] ContainerList.end_update() completed in {end_time - start_time:.3f}s")
 
     def _restore_selection(self) -> None:
         """Restore the previously selected item after a refresh."""
@@ -620,9 +649,25 @@ class ContainerList(VerticalScroll):
                 first_header.expanded = True
                 first_table = self.stack_tables[first_header.stack_name]
                 first_table.styles.display = "block"
+
+                # Log the state of all tables for debugging
+                for stack_name, table in self.stack_tables.items():
+                    logger.info(f"Table for stack {stack_name}: cursor_type={table.cursor_type}, show_cursor={table.show_cursor}")
+
+                # If there are rows in the first table, select the first container
                 if first_table.row_count > 0:
                     first_table.focus()
                     first_table.move_cursor(row=0)
+
+                    # Get the container ID from the first row
+                    container_id = first_table.get_cell_at((0, 0))
+                    if container_id:
+                        self.select_container(container_id)
+                        logger.info(f"Selected first container: {container_id}")
+                else:
+                    # If no containers, select the stack
+                    self.select_stack(first_header.stack_name)
+                    logger.info(f"Selected first stack: {first_header.stack_name}")
         except Exception as e:
             logger.error(f"Error during ContainerList mount: {str(e)}", exc_info=True)
             raise
@@ -648,8 +693,9 @@ class ContainerList(VerticalScroll):
                 "total": header.total
             }
 
-            # Update the footer
+            # Update the footer and cursor visibility
             self._update_footer_with_selection()
+            self._update_cursor_visibility()
 
     def select_container(self, container_id: str) -> None:
         """Select a container and update the footer.
@@ -657,6 +703,7 @@ class ContainerList(VerticalScroll):
         Args:
             container_id: ID of the container to select
         """
+        logger.info(f"Selecting container: {container_id}")
         if container_id in self.container_rows:
             # Clear any previous selection
             self.selected_item = ("container", container_id)
@@ -668,24 +715,49 @@ class ContainerList(VerticalScroll):
 
             # Get container data from the table
             container_data = {
-                "id": table.get_cell_at(row_idx, 0),
-                "name": table.get_cell_at(row_idx, 1),
-                "status": table.get_cell_at(row_idx, 2),
-                "cpu": table.get_cell_at(row_idx, 3),
-                "memory": table.get_cell_at(row_idx, 4),
-                "pids": table.get_cell_at(row_idx, 5),
-                "ports": table.get_cell_at(row_idx, 6),
+                "id": table.get_cell_at((row_idx, 0)),
+                "name": table.get_cell_at((row_idx, 1)),
+                "status": table.get_cell_at((row_idx, 2)),
+                "cpu": table.get_cell_at((row_idx, 3)),
+                "memory": table.get_cell_at((row_idx, 4)),
+                "pids": table.get_cell_at((row_idx, 5)),
+                "ports": table.get_cell_at((row_idx, 6)),
                 "stack": stack_name
             }
 
             self.selected_container_data = container_data
+            logger.info(f"Container data: {container_data}")
 
-            # Update the footer
+            # Make sure the stack is expanded
+            header = self.stack_headers[stack_name]
+            if not header.expanded:
+                header.expanded = True
+                table.styles.display = "block"
+                header._update_content()
+
+            # Focus the table and position the cursor
+            table.focus()
+
+            # Position the cursor on the selected row
+            if table.cursor_row != row_idx:
+                table.move_cursor(row=row_idx)
+                logger.info(f"Moved cursor to row {row_idx}")
+
+            # Force a refresh of the table to ensure the cursor is visible
+            table.refresh()
+
+            # Update the footer with selection
             self._update_footer_with_selection()
+
+            # Log the current state for debugging
+            logger.info(f"Table cursor_type: {table.cursor_type}, show_cursor: {table.show_cursor}, cursor_row: {table.cursor_row}")
+        else:
+            logger.error(f"Container ID {container_id} not found in container_rows")
 
     def _update_footer_with_selection(self) -> None:
         """Update the footer with the current selection information."""
         if self.screen is None:
+            logger.warning("Cannot update footer: screen is None")
             return
 
         try:
@@ -693,43 +765,143 @@ class ContainerList(VerticalScroll):
 
             if self.selected_item is None:
                 # Clear the status bar
-                status_bar.update("No selection")
+                logger.info("No selection, clearing status bar")
+                from rich.text import Text
+                from rich.style import Style
+                no_selection_text = Text("No selection", Style(color="white", bold=True))
+                status_bar.update(no_selection_text)
                 return
 
             item_type, item_id = self.selected_item
+            logger.info(f"Updating footer with selection: {item_type} - {item_id}")
 
             if item_type == "stack" and self.selected_stack_data:
                 stack_data = self.selected_stack_data
-                selection_text = f"Currently selected: docker compose stack with config \"{stack_data['config_file']}\" and name \"{stack_data['name']}\""
+                from rich.text import Text
+                from rich.style import Style
+
+                # Create a rich text object with styled components
+                selection_text = Text()
+                selection_text.append("Stack: ", Style(color="white"))
+                selection_text.append(f"{stack_data['name']}", Style(color="white", bold=True))
+                selection_text.append(" | ", Style(color="white"))
+                selection_text.append(f"Running: ", Style(color="white"))
+                selection_text.append(f"{stack_data['running']}", Style(color="green", bold=True))
+                selection_text.append(" | ", Style(color="white"))
+                selection_text.append(f"Exited: ", Style(color="white"))
+                selection_text.append(f"{stack_data['exited']}", Style(color="yellow", bold=True))
+                selection_text.append(" | ", Style(color="white"))
+                selection_text.append(f"Total: ", Style(color="white"))
+                selection_text.append(f"{stack_data['total']}", Style(color="cyan", bold=True))
+
+                logger.info(f"Updating status bar with stack: {stack_data['name']}")
                 status_bar.update(selection_text)
 
             elif item_type == "container" and self.selected_container_data:
                 container_data = self.selected_container_data
-                selection_text = f"Currently selected: docker container with ID \"{container_data['id']}\" and name \"{container_data['name']}\""
+                from rich.text import Text
+                from rich.style import Style
+
+                # Create a rich text object with styled components
+                selection_text = Text()
+                selection_text.append("Container: ", Style(color="white"))
+                selection_text.append(f"{container_data['name']}", Style(color="white", bold=True))
+                selection_text.append(" | ", Style(color="white"))
+                selection_text.append("Status: ", Style(color="white"))
+
+                # Style status based on value
+                status = container_data['status']
+                if "running" in status.lower():
+                    status_style = Style(color="green", bold=True)
+                elif "exited" in status.lower():
+                    status_style = Style(color="yellow", bold=True)
+                else:
+                    status_style = Style(color="red", bold=True)
+
+                selection_text.append(status, status_style)
+
+                # Add CPU and memory if available
+                if 'cpu' in container_data and container_data['cpu']:
+                    selection_text.append(" | ", Style(color="white"))
+                    selection_text.append("CPU: ", Style(color="white"))
+                    selection_text.append(f"{container_data['cpu']}", Style(color="cyan", bold=True))
+
+                if 'memory' in container_data and container_data['memory']:
+                    selection_text.append(" | ", Style(color="white"))
+                    selection_text.append("Memory: ", Style(color="white"))
+                    selection_text.append(f"{container_data['memory']}", Style(color="magenta", bold=True))
+
+                logger.info(f"Updating status bar with container: {container_data['name']}")
                 status_bar.update(selection_text)
 
             else:
                 # Clear the status bar if no valid selection
-                status_bar.update("No selection")
+                logger.warning(f"Invalid selection: {item_type} - {item_id}")
+                from rich.text import Text
+                from rich.style import Style
+                invalid_selection_text = Text(f"Invalid selection: {item_type} - {item_id}", Style(color="red", bold=True))
+                status_bar.update(invalid_selection_text)
 
         except Exception as e:
             logger.error(f"Error updating status bar: {str(e)}", exc_info=True)
 
-    def on_data_table_cell_selected(self, event) -> None:
-        """Handle DataTable cell selection events."""
-        table = event.sender
+    def _update_cursor_visibility(self) -> None:
+        """Update cursor visibility and focus based on current selection.
+
+        Instead of hiding cursors, we focus the table containing the selected container
+        and ensure the cursor is positioned on the correct row.
+        """
+        try:
+            # If a container is selected, focus its table and position the cursor
+            if self.selected_item and self.selected_item[0] == "container":
+                container_id = self.selected_item[1]
+                if container_id in self.container_rows:
+                    stack_name, row_idx = self.container_rows[container_id]
+                    if stack_name in self.stack_tables:
+                        table = self.stack_tables[stack_name]
+
+                        # Focus the table
+                        table.focus()
+
+                        # Ensure the cursor is positioned on the correct row
+                        if table.cursor_row != row_idx:
+                            table.move_cursor(row=row_idx)
+
+                        logger.info(f"Focused table for stack: {stack_name} and positioned cursor at row: {row_idx}")
+
+            # If a stack is selected, focus its header
+            elif self.selected_item and self.selected_item[0] == "stack":
+                stack_name = self.selected_item[1]
+                if stack_name in self.stack_headers:
+                    header = self.stack_headers[stack_name]
+                    header.focus()
+                    logger.info(f"Focused header for stack: {stack_name}")
+
+        except Exception as e:
+            logger.error(f"Error updating cursor visibility and focus: {str(e)}", exc_info=True)
+
+    def on_data_table_row_selected(self, event) -> None:
+        """Handle DataTable row selection events."""
+        table = event.data_table
+        row_key = event.row_key
+
+        logger.info(f"DataTable.RowSelected event received: {event}")
+        logger.info(f"Row selected: {row_key}, cursor_row: {event.cursor_row}")
 
         # Find which stack this table belongs to
         for stack_name, stack_table in self.stack_tables.items():
             if stack_table == table:
                 # Get the container ID from the first column
                 try:
-                    row = table.cursor_row
+                    row = table.get_row_index(row_key)
                     if row is not None and row < table.row_count:
-                        container_id = table.get_cell_at(row, 0)
+                        container_id = table.get_cell_at((row, 0))
+                        logger.info(f"Container selected via RowSelected event: {container_id}")
+
+                        # Select the container to update the status bar
                         self.select_container(container_id)
                 except Exception as e:
-                    logger.error(f"Error handling table selection: {str(e)}", exc_info=True)
+                    logger.error(f"Error handling row selection: {str(e)}", exc_info=True)
                 break
 
     def on_stack_header_selected(self, event) -> None:
@@ -757,7 +929,7 @@ class ContainerList(VerticalScroll):
                 # Update selection based on new cursor position
                 row = current.cursor_row
                 stack_name = next(name for name, table in self.stack_tables.items() if table == current)
-                container_id = current.get_cell_at(row, 0)
+                container_id = current.get_cell_at((row, 0))
                 self.select_container(container_id)
         elif isinstance(current, StackHeader):
             # Find previous visible widget
@@ -769,7 +941,7 @@ class ContainerList(VerticalScroll):
                     prev_table.focus()
                     prev_table.move_cursor(row=prev_table.row_count - 1)
                     # Update selection to the container
-                    container_id = prev_table.get_cell_at(prev_table.row_count - 1, 0)
+                    container_id = prev_table.get_cell_at((prev_table.row_count - 1, 0))
                     self.select_container(container_id)
                 else:
                     prev_header.focus()
@@ -792,7 +964,7 @@ class ContainerList(VerticalScroll):
                 # Update selection based on new cursor position
                 row = current.cursor_row
                 stack_name = next(name for name, table in self.stack_tables.items() if table == current)
-                container_id = current.get_cell_at(row, 0)
+                container_id = current.get_cell_at((row, 0))
                 self.select_container(container_id)
         elif isinstance(current, StackHeader):
             # If expanded and has rows, focus the table
@@ -802,7 +974,7 @@ class ContainerList(VerticalScroll):
                 table.focus()
                 table.move_cursor(row=0)
                 # Update selection to the first container
-                container_id = table.get_cell_at(0, 0)
+                container_id = table.get_cell_at((0, 0))
                 self.select_container(container_id)
             else:
                 # Focus next header
@@ -823,8 +995,171 @@ class ContainerList(VerticalScroll):
                 try:
                     row = table.cursor_row
                     if row is not None and row < table.row_count:
-                        container_id = table.get_cell_at(row, 0)
+                        container_id = table.get_cell_at((row, 0))
+                        logger.info(f"Cursor moved to container: {container_id}")
+                        # Select the container to update the status bar
                         self.select_container(container_id)
                 except Exception as e:
                     logger.error(f"Error handling table cursor movement: {str(e)}", exc_info=True)
+                break
+
+    def on_data_table_cell_selected(self, event) -> None:
+        """Handle DataTable cell selection events."""
+        table = event.sender
+
+        # Find which stack this table belongs to
+        for stack_name, stack_table in self.stack_tables.items():
+            if stack_table == table:
+                # Get the container ID from the first column
+                try:
+                    row = table.cursor_row
+                    if row is not None and row < table.row_count:
+                        container_id = table.get_cell_at((row, 0))
+                        self.select_container(container_id)
+                        logger.info(f"Container selected via cell: {container_id}")
+                except Exception as e:
+                    logger.error(f"Error handling table selection: {str(e)}", exc_info=True)
+                break
+
+    def on_data_table_row_highlighted(self, event) -> None:
+        """Handle DataTable row highlight events."""
+        table = event.data_table
+        row_key = event.row_key
+
+        # Find which stack this table belongs to
+        for stack_name, stack_table in self.stack_tables.items():
+            if stack_table == table:
+                # Get the container ID from the first column
+                try:
+                    row = table.get_row_index(row_key)
+                    if row is not None and row < table.row_count:
+                        container_id = table.get_cell_at((row, 0))
+                        # We don't select the container here, just log for debugging
+                        logger.info(f"Container highlighted: {container_id}")
+                except Exception as e:
+                    logger.error(f"Error handling row highlight: {str(e)}", exc_info=True)
+                break
+
+    def on_data_table_cell_highlighted(self, event) -> None:
+        """Handle DataTable cell highlight events."""
+        table = event.data_table
+        coordinate = event.coordinate
+
+        # Find which stack this table belongs to
+        for stack_name, stack_table in self.stack_tables.items():
+            if stack_table == table:
+                # Get the container ID from the first column
+                try:
+                    row, _ = coordinate
+                    if row is not None and row < table.row_count:
+                        container_id = table.get_cell_at((row, 0))
+                        logger.info(f"Cell highlighted for container: {container_id}")
+                except Exception as e:
+                    logger.error(f"Error handling cell highlight: {str(e)}", exc_info=True)
+                break
+
+    def on_data_table_click(self, event) -> None:
+        """Handle DataTable click events."""
+        table = event.sender
+
+        logger.info(f"DataTable click event received: {event}")
+        logger.info(f"Event attributes: {dir(event)}")
+
+        # Find which stack this table belongs to
+        for stack_name, stack_table in self.stack_tables.items():
+            if stack_table == table:
+                try:
+                    # Get the click coordinates
+                    if hasattr(event, 'coordinate'):
+                        row, _ = event.coordinate
+                        logger.info(f"Click coordinate: {event.coordinate}")
+                    elif hasattr(event, 'y'):
+                        # Convert screen y to row index
+                        y = event.y - table.screen_y
+                        row = y // 1  # Assuming row height is 1
+                        logger.info(f"Click y position: {y}, calculated row: {row}")
+                    else:
+                        # Fall back to current cursor position
+                        row = table.cursor_row
+                        logger.info(f"Using current cursor row: {row}")
+
+                    logger.info(f"Click detected at row: {row}")
+
+                    if row is not None and row < table.row_count:
+                        # Focus the table
+                        table.focus()
+
+                        # Move the cursor to the clicked row
+                        table.move_cursor(row=row)
+
+                        # Get the container ID from the first column
+                        container_id = table.get_cell_at((row, 0))
+                        logger.info(f"Table clicked for container: {container_id}")
+
+                        # Select the container to update the status bar
+                        self.select_container(container_id)
+                except Exception as e:
+                    logger.error(f"Error handling table click: {str(e)}", exc_info=True)
+                break
+
+    def on_data_table_selected(self, event) -> None:
+        """Handle DataTable selection events."""
+        table = event.sender
+
+        logger.info(f"DataTable.Selected event received: {event}")
+
+        # Find which stack this table belongs to
+        for stack_name, stack_table in self.stack_tables.items():
+            if stack_table == table:
+                try:
+                    # Get the selected row
+                    row = table.cursor_row
+                    if row is not None and row < table.row_count:
+                        # Get the container ID from the first column
+                        container_id = table.get_cell_at((row, 0))
+                        logger.info(f"Container selected via DataTable.Selected: {container_id}")
+
+                        # Select the container to update the status bar
+                        self.select_container(container_id)
+                except Exception as e:
+                    logger.error(f"Error handling DataTable.Selected event: {str(e)}", exc_info=True)
+                break
+
+    def on_data_table_mouse_down(self, event) -> None:
+        """Handle mouse down events on the DataTable."""
+        table = event.sender
+
+        logger.info(f"DataTable mouse down event received: {event}")
+        logger.info(f"Mouse event attributes: {dir(event)}")
+
+        # Find which stack this table belongs to
+        for stack_name, stack_table in self.stack_tables.items():
+            if stack_table == table:
+                try:
+                    # Get the mouse position relative to the table
+                    mouse_x, mouse_y = event.x, event.y
+
+                    # Convert to row index
+                    # The exact calculation depends on the table's layout
+                    # This is a simplified version
+                    header_height = 1  # Adjust based on your header height
+                    row = (mouse_y - header_height) // 1  # Assuming row height is 1
+
+                    logger.info(f"Mouse down at position: ({mouse_x}, {mouse_y}), calculated row: {row}")
+
+                    if row >= 0 and row < table.row_count:
+                        # Focus the table
+                        table.focus()
+
+                        # Move the cursor to the clicked row
+                        table.move_cursor(row=row)
+
+                        # Get the container ID from the first column
+                        container_id = table.get_cell_at((row, 0))
+                        logger.info(f"Mouse down on container: {container_id}")
+
+                        # Select the container to update the status bar
+                        self.select_container(container_id)
+                except Exception as e:
+                    logger.error(f"Error handling mouse down: {str(e)}", exc_info=True)
                 break
