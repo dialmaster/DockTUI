@@ -81,6 +81,13 @@ cd dockerview
 # On Linux/macOS
 pip install poetry
 
+# Run dockerview (automatically installs dependencies)
+./start.sh
+```
+
+### Alternative Setup (Manual)
+
+```bash
 # Install dependencies and create virtual environment
 poetry install
 
@@ -96,8 +103,21 @@ python -m dockerview
 To enable debug mode with detailed logging:
 
 ```bash
-# Enable debug mode
-export DOCKERVIEW_DEBUG=1
+# Using the start script (recommended)
+./start.sh -d
 
-# Run dockerview
+# Or manually
+export DOCKERVIEW_DEBUG=1
 python -m dockerview
+```
+
+### Start Script Options
+
+The `./start.sh` script supports the following options:
+
+```bash
+./start.sh           # Run normally
+./start.sh -d        # Run with debug logging enabled
+./start.sh --debug   # Same as -d
+./start.sh -h        # Show help
+./start.sh --help    # Show help
