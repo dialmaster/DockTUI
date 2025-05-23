@@ -1,4 +1,5 @@
 import logging
+from logging.handlers import RotatingFileHandler
 from textual import work
 from textual.app import App, ComposeResult
 from textual.containers import Container, Vertical
@@ -41,7 +42,12 @@ def setup_logging():
         '%(asctime)s - %(name)s - %(levelname)s - %(threadName)s - %(message)s'
     )
 
-    file_handler = logging.FileHandler(log_file)
+    # Use RotatingFileHandler to limit log file size to 20MB with 2 backup files
+    file_handler = RotatingFileHandler(
+        log_file, 
+        maxBytes=20 * 1024 * 1024,  # 20MB
+        backupCount=2
+    )
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(file_formatter)
 
