@@ -11,6 +11,160 @@ from textual.message import Message
 
 logger = logging.getLogger('dockerview.containers')
 
+class SectionHeader(Static):
+    """A section header widget for grouping related items (Networks, Stacks, etc.).
+
+    Displays a prominent section title to organize the UI into logical groups.
+    """
+
+    DEFAULT_CSS = """
+    SectionHeader {
+        background: $primary;
+        color: $text;
+        padding: 0 1;
+        height: 1;
+        margin: 1 0 0 0;
+        text-style: bold;
+        text-align: center;
+    }
+    """
+
+    def __init__(self, title: str):
+        """Initialize the section header.
+
+        Args:
+            title: The section title to display
+        """
+        super().__init__(title)
+        self.can_focus = False  # Section headers are not focusable
+
+class NetworkHeader(Static):
+    """A header widget for displaying Docker network information.
+
+    Displays network name, driver, scope, and connected container/stack counts with
+    collapsible/expandable functionality.
+    """
+
+    COMPONENT_CLASSES = {"header": "network-header--header"}
+
+    DEFAULT_CSS = """
+    NetworkHeader {
+        background: $surface-darken-1;
+        padding: 0 0;
+        height: 3;
+        border-bottom: solid $accent-darken-3;
+        margin: 0 0 0 0;
+        color: $text;
+    }
+
+    NetworkHeader:hover {
+        background: $surface-lighten-1;
+        color: $accent-lighten-1;
+        text-style: bold;
+    }
+
+    NetworkHeader:focus {
+        background: $surface-lighten-2;
+        color: $accent-lighten-2;
+        text-style: bold;
+    }
+
+    .network-header--header {
+        color: $text;
+        text-style: bold;
+    }
+    """
+
+    class Selected(Message):
+        """Event emitted when the header is selected."""
+        def __init__(self, network_header: "NetworkHeader") -> None:
+            self.network_header = network_header
+            super().__init__()
+
+    class Clicked(Message):
+        """Event emitted when the header is clicked."""
+        def __init__(self, network_header: "NetworkHeader") -> None:
+            self.network_header = network_header
+            super().__init__()
+
+    def __init__(self, network_name: str, driver: str, scope: str, subnet: str, 
+                 total_containers: int, connected_stacks: set):
+        """Initialize the network header.
+
+        Args:
+            network_name: Name of the Docker network
+            driver: Network driver (bridge, overlay, host, etc.)
+            scope: Network scope (local, swarm)
+            subnet: Network subnet/IP range
+            total_containers: Total number of connected containers
+            connected_stacks: Set of stack names using this network
+        """
+        super().__init__("")
+        self.network_name = network_name
+        self.driver = driver
+        self.scope = scope
+        self.subnet = subnet
+        self.total_containers = total_containers
+        self.connected_stacks = connected_stacks
+        self.expanded = False  # Start collapsed by default
+        self.can_focus = True
+        self._last_click_time = 0
+        self._update_content()
+
+    def _update_content(self) -> None:
+        """Update the header's displayed content based on current state."""
+        icon = "▼" if self.expanded else "▶"
+        
+        # Format connected stacks list
+        logger.debug(f"Network {self.network_name} connected_stacks: {self.connected_stacks}")
+        if self.connected_stacks:
+            stacks_text = ", ".join(sorted(self.connected_stacks))
+            if len(stacks_text) > 40:
+                stacks_text = stacks_text[:37] + "..."
+        else:
+            stacks_text = "No stacks"
+
+        content = Text.assemble(
+            Text(f"{icon} ", style="bold"),
+            Text(self.network_name, style="bold cyan"),
+            " ",
+            Text(f"({self.driver}/{self.scope})", style="dim"),
+            " ",
+            Text(f"Subnet: {self.subnet}", style="blue"),
+            "\n",
+            Text(f"Containers: {self.total_containers}, Stacks: {stacks_text}", style="yellow")
+        )
+        self.update(content)
+
+    def on_focus(self) -> None:
+        """Called when the header gets focus."""
+        self.refresh()
+        self.post_message(self.Selected(self))
+
+    def on_blur(self) -> None:
+        """Called when the header loses focus."""
+        self.refresh()
+
+    def toggle(self) -> None:
+        """Toggle the expanded/collapsed state of the network."""
+        self.expanded = not self.expanded
+        self._update_content()
+
+    def on_click(self) -> None:
+        """Handle click events for double-click detection."""
+        import time
+        current_time = time.time()
+
+        self.post_message(self.Clicked(self))
+
+        if current_time - self._last_click_time < 0.5:
+            self.focus()
+            if self.screen:
+                container_list = self.screen.query_one("ContainerList")
+                container_list.action_toggle_network()
+
+        self._last_click_time = current_time
+
 class StackHeader(Static):
     """A header widget for displaying Docker Compose stack information.
 
@@ -155,6 +309,15 @@ class ContainerList(VerticalScroll):
         height: 3;
     }
 
+    .network-container {
+        layout: vertical;
+        width: 100%;
+        height: auto;
+        margin: 0 0 1 0;
+        background: $surface;
+        border: solid $accent-darken-3;
+    }
+
     .stack-container {
         layout: vertical;
         width: 100%;
@@ -207,32 +370,82 @@ class ContainerList(VerticalScroll):
     BINDINGS = [
         Binding("up", "cursor_up", "Up", show=False),
         Binding("down", "cursor_down", "Down", show=False),
-        Binding("enter", "toggle_stack", "Expand/Collapse", show=True),
-        Binding("space", "toggle_stack", "Expand/Collapse", show=False),
+        Binding("enter", "toggle_item", "Expand/Collapse", show=True),
+        Binding("space", "toggle_item", "Expand/Collapse", show=False),
     ]
 
     def __init__(self):
         """Initialize the container list widget."""
         try:
             super().__init__()
+            # Network components
+            self.network_tables = {}  # Dictionary to store tables for each network
+            self.network_headers = {}  # Dictionary to store headers for each network
+            self.network_rows = {}  # Dictionary to track container rows by network/container ID
+            self.expanded_networks = set()  # Keep track of which networks are expanded
+            
+            # Stack components
             self.stack_tables = {}  # Dictionary to store tables for each stack
             self.stack_headers = {}  # Dictionary to store headers for each stack
             self.container_rows = {}  # Dictionary to track container rows by ID
-            self.current_focus = None
             self.expanded_stacks = set()  # Keep track of which stacks are expanded
+            
+            # Section headers
+            self.networks_section_header = None
+            self.stacks_section_header = None
+            
+            # General state
+            self.current_focus = None
             self._is_updating = False  # Track if we're in a batch update
             self._pending_clear = False  # Track if we need to clear during batch update
 
             # Selection tracking
-            self.selected_item = None  # Will store either ("stack", stack_name) or ("container", container_id)
+            self.selected_item = None  # Will store ("network", network_name), ("stack", stack_name) or ("container", container_id)
             self.selected_container_data = None  # Will store container data if a container is selected
             self.selected_stack_data = None  # Will store stack data if a stack is selected
+            self.selected_network_data = None  # Will store network data if a network is selected
 
-            # Track which stacks exist in current update cycle
+            # Track which stacks/networks exist in current update cycle
             self._stacks_in_new_data = set()
+            self._networks_in_new_data = set()
         except Exception as e:
             logger.error(f"Error during ContainerList initialization: {str(e)}", exc_info=True)
             raise
+
+    def create_network_table(self, network_name: str) -> DataTable:
+        """Create a new DataTable for displaying network container information.
+
+        Args:
+            network_name: Name of the network this table will display
+
+        Returns:
+            DataTable: A configured table for displaying network container information
+        """
+        table = DataTable()
+        table.add_columns(
+            "Container ID", "Container Name", "Stack", "IP Address"
+        )
+
+        # Configure cursor behavior
+        table.cursor_type = "row"
+        table.display = False  # Start collapsed
+        table.can_focus = True
+        table.show_cursor = True
+        table.watch_cursor = True
+
+        logger.info(f"Created network table for {network_name} with cursor_type={table.cursor_type}, show_cursor={table.show_cursor}")
+
+        return table
+
+    def _ensure_section_headers(self) -> None:
+        """Ensure section headers exist for stacks and networks."""
+        if self.stacks_section_header is None:
+            self.stacks_section_header = SectionHeader("📦 DOCKER COMPOSE STACKS")
+            # Remove top margin for the first section header
+            self.stacks_section_header.styles.margin = (0, 0, 0, 0)
+        
+        if self.networks_section_header is None:
+            self.networks_section_header = SectionHeader("🌐 DOCKER NETWORKS")
 
     def create_stack_table(self, stack_name: str) -> DataTable:
         """Create a new DataTable for displaying container information.
@@ -274,16 +487,23 @@ class ContainerList(VerticalScroll):
 
         # Clear all tables to ensure fresh data
         clear_tables_start = time.time()
+        for table in self.network_tables.values():
+            table.clear()
         for table in self.stack_tables.values():
             table.clear()
         clear_tables_end = time.time()
         logger.info(f"[PERF] Clearing tables took {clear_tables_end - clear_tables_start:.3f}s")
 
-        # Clear the container_rows tracking dictionary to ensure we properly update all containers
+        # Clear the tracking dictionaries to ensure we properly update all data
         self.container_rows.clear()
+        self.network_rows.clear()
 
-        # Track which stacks should exist after this update (reset each update cycle)
+        # Track which networks and stacks should exist after this update (reset each update cycle)
+        self._networks_in_new_data = set()
         self._stacks_in_new_data = set()
+
+        # Ensure section headers are created
+        self._ensure_section_headers()
 
         end_time = time.time()
         logger.info(f"[PERF] ContainerList.begin_update() completed in {end_time - start_time:.3f}s")
@@ -294,8 +514,17 @@ class ContainerList(VerticalScroll):
         start_time = time.time()
 
         try:
-            # First, clean up stacks that no longer exist in the Docker data
+            # First, clean up networks and stacks that no longer exist in the Docker data
             cleanup_start = time.time()
+            
+            # Networks cleanup
+            networks_to_remove = []
+            for network_name in list(self.network_headers.keys()):
+                if network_name not in self._networks_in_new_data:
+                    networks_to_remove.append(network_name)
+                    logger.info(f"Removing network that no longer exists: {network_name}")
+            
+            # Stacks cleanup
             stacks_to_remove = []
             for stack_name in list(self.stack_headers.keys()):
                 if stack_name not in self._stacks_in_new_data:
@@ -309,6 +538,31 @@ class ContainerList(VerticalScroll):
                     if cstack not in containers_to_remove:
                         containers_to_remove[cstack] = []
                     containers_to_remove[cstack].append(cid)
+
+            # Remove obsolete networks and their associated data
+            for network_name in networks_to_remove:
+                # Remove from expanded networks tracking
+                self.expanded_networks.discard(network_name)
+
+                # Remove actual UI widgets - find and remove the network container
+                for child in list(self.children):
+                    if isinstance(child, Container) and "network-container" in child.classes:
+                        # Find the network name by looking at the header
+                        for widget in child.children:
+                            if isinstance(widget, NetworkHeader) and widget.network_name == network_name:
+                                child.remove()
+                                break
+
+                # Remove from internal tracking dictionaries
+                if network_name in self.network_headers:
+                    del self.network_headers[network_name]
+                if network_name in self.network_tables:
+                    del self.network_tables[network_name]
+
+                # Clear selection if it was pointing to this network
+                if self.selected_item and self.selected_item[0] == "network" and self.selected_item[1] == network_name:
+                    self.selected_item = None
+                    self.selected_network_data = None
 
             # Remove obsolete stacks and their associated data
             for stack_name in stacks_to_remove:
@@ -350,21 +604,39 @@ class ContainerList(VerticalScroll):
             # Then, determine what needs to be added, updated, or removed
             prepare_start = time.time()
 
-            # Track existing and new stack containers
+            # Track existing and new containers (both networks and stacks)
+            existing_network_containers = {}
             existing_stack_containers = {}
+            new_network_containers = {}
             new_stack_containers = {}
 
-            # Find all existing stack containers in the UI
+            # Find all existing containers in the UI
             if not self._pending_clear:
                 for child in self.children:
-                    if isinstance(child, Container) and "stack-container" in child.classes:
+                    if isinstance(child, Container) and "network-container" in child.classes:
+                        # Find the network name by looking at the header
+                        for widget in child.children:
+                            if isinstance(widget, NetworkHeader):
+                                existing_network_containers[widget.network_name] = child
+                                break
+                    elif isinstance(child, Container) and "stack-container" in child.classes:
                         # Find the stack name by looking at the header
                         for widget in child.children:
                             if isinstance(widget, StackHeader):
                                 existing_stack_containers[widget.stack_name] = child
                                 break
 
-            # Prepare all new containers that need to be added
+            # Prepare all new network containers that need to be added
+            for network_name in sorted(self.network_headers.keys()):
+                header = self.network_headers[network_name]
+                table = self.network_tables[network_name]
+
+                # If this network is not already in the UI, prepare it for mounting
+                if network_name not in existing_network_containers:
+                    network_container = Container(classes="network-container")
+                    new_network_containers[network_name] = (network_container, header, table)
+
+            # Prepare all new stack containers that need to be added
             for stack_name in sorted(self.stack_headers.keys()):
                 header = self.stack_headers[stack_name]
                 table = self.stack_tables[stack_name]
@@ -385,20 +657,57 @@ class ContainerList(VerticalScroll):
                 logger.info(f"[PERF] Clearing ContainerList took {clear_end - clear_start:.3f}s")
                 self._pending_clear = False
 
-                # Mount all containers at once
+                # Ensure section headers exist
+                self._ensure_section_headers()
+
+                # Mount all containers at once (stacks first, then networks)
                 mount_start = time.time()
-                for stack_name, (stack_container, header, table) in new_stack_containers.items():
-                    self.mount(stack_container)
-                    stack_container.mount(header)
-                    stack_container.mount(table)
-                    table.styles.display = "block" if header.expanded else "none"
+                
+                # Mount stacks section  
+                if new_stack_containers or self.stack_headers:
+                    self.mount(self.stacks_section_header)
+                    for stack_name, (stack_container, header, table) in new_stack_containers.items():
+                        self.mount(stack_container)
+                        stack_container.mount(header)
+                        stack_container.mount(table)
+                        table.styles.display = "block" if header.expanded else "none"
+                
+                # Mount networks section
+                if new_network_containers or self.network_headers:
+                    self.mount(self.networks_section_header)
+                    for network_name, (network_container, header, table) in new_network_containers.items():
+                        self.mount(network_container)
+                        network_container.mount(header)
+                        network_container.mount(table)
+                        table.styles.display = "block" if header.expanded else "none"
+                
                 mount_end = time.time()
-                logger.info(f"[PERF] Mounting {len(new_stack_containers)} containers took {mount_end - mount_start:.3f}s")
+                total_containers = len(new_network_containers) + len(new_stack_containers)
+                logger.info(f"[PERF] Mounting {total_containers} containers took {mount_end - mount_start:.3f}s")
             else:
                 # Update existing containers and add new ones
                 update_start = time.time()
 
-                # First update all existing containers (in place)
+                # First update all existing network containers (in place)
+                for network_name, container in existing_network_containers.items():
+                    if network_name in self.network_headers:
+                        # Update the header and table display state
+                        header = self.network_headers[network_name]
+                        table = self.network_tables[network_name]
+
+                        # Find the existing header and table in the container
+                        for widget in container.children:
+                            if isinstance(widget, NetworkHeader):
+                                # Update header content without remounting
+                                widget._update_content()
+                            elif isinstance(widget, DataTable):
+                                # Update table display state
+                                widget.styles.display = "block" if header.expanded else "none"
+                    else:
+                        # This network no longer exists, remove it
+                        container.remove()
+
+                # Then update all existing stack containers (in place)
                 for stack_name, container in existing_stack_containers.items():
                     if stack_name in self.stack_headers:
                         # Update the header and table display state
@@ -417,11 +726,31 @@ class ContainerList(VerticalScroll):
                         # This stack no longer exists, remove it
                         container.remove()
 
-                # Then add any new containers
+                # Ensure section headers exist
+                self._ensure_section_headers()
+
+                # Check if we need to mount section headers
+                networks_header_exists = self.networks_section_header in self.children
+                stacks_header_exists = self.stacks_section_header in self.children
+
+                # Mount section headers if needed
+                if (new_stack_containers or self.stack_headers) and not stacks_header_exists:
+                    self.mount(self.stacks_section_header)
+                    
+                if (new_network_containers or self.network_headers) and not networks_header_exists:
+                    self.mount(self.networks_section_header)
+
+                # Then add any new containers (stacks first, then networks)
                 for stack_name, (stack_container, header, table) in new_stack_containers.items():
                     self.mount(stack_container)
                     stack_container.mount(header)
                     stack_container.mount(table)
+                    table.styles.display = "block" if header.expanded else "none"
+                        
+                for network_name, (network_container, header, table) in new_network_containers.items():
+                    self.mount(network_container)
+                    network_container.mount(header)
+                    network_container.mount(table)
                     table.styles.display = "block" if header.expanded else "none"
 
                 update_end = time.time()
@@ -520,6 +849,95 @@ class ContainerList(VerticalScroll):
 
         end_time = time.time()
         logger.info(f"[PERF] ContainerList.clear() completed in {end_time - start_time:.3f}s")
+
+    def add_network(self, network_data: dict) -> None:
+        """Add or update a network section in the container list.
+
+        Args:
+            network_data: Dictionary containing network information
+        """
+        network_name = network_data['name']
+        
+        # Track that this network exists in the new data
+        self._networks_in_new_data.add(network_name)
+
+        if network_name not in self.network_tables:
+            header = NetworkHeader(
+                network_name,
+                network_data['driver'],
+                network_data['scope'],
+                network_data['subnet'],
+                network_data['total_containers'],
+                network_data['connected_stacks']
+            )
+            table = self.create_network_table(network_name)
+
+            self.network_headers[network_name] = header
+            self.network_tables[network_name] = table
+
+            if network_name in self.expanded_networks:
+                header.expanded = True
+                table.styles.display = "block"
+
+            # Create and mount the container immediately unless we're in a batch update
+            if not self._is_updating:
+                mount_start = time.time()
+                network_container = Container(classes="network-container")
+                self.mount(network_container)
+                network_container.mount(header)
+                network_container.mount(table)
+                # Ensure proper display state
+                table.styles.display = "block" if header.expanded else "none"
+                mount_end = time.time()
+                logger.info(f"[PERF] Mounting single network {network_name} took {mount_end - mount_start:.3f}s")
+
+            # Update selected network data if this is the selected network
+            if self.selected_item and self.selected_item[0] == "network" and self.selected_item[1] == network_name:
+                self.selected_network_data = network_data
+        else:
+            header = self.network_headers[network_name]
+            was_expanded = header.expanded
+            header.driver = network_data['driver']
+            header.scope = network_data['scope']
+            header.subnet = network_data['subnet']
+            header.total_containers = network_data['total_containers']
+            header.connected_stacks = network_data['connected_stacks']
+            header.expanded = was_expanded
+            self.network_tables[network_name].styles.display = "block" if was_expanded else "none"
+            header._update_content()
+
+            # Update selected network data if this is the selected network
+            if self.selected_item and self.selected_item[0] == "network" and self.selected_item[1] == network_name:
+                self.selected_network_data = network_data
+
+    def add_container_to_network(self, network_name: str, container_data: dict) -> None:
+        """Add or update a container in its network's table.
+
+        Args:
+            network_name: Name of the network the container is connected to
+            container_data: Dictionary containing container information
+        """
+        if network_name not in self.network_tables:
+            logger.warning(f"Network {network_name} not found when trying to add container")
+            return
+
+        table = self.network_tables[network_name]
+        container_id = container_data["id"]
+
+        row_data = (
+            container_data["id"],
+            container_data["name"],
+            container_data["stack"],
+            container_data["ip"]
+        )
+
+        try:
+            # Add as a new row
+            row_key = table.row_count
+            table.add_row(*row_data)
+            self.network_rows[f"{network_name}:{container_id}"] = (network_name, row_key)
+        except Exception as e:
+            logger.error(f"Error adding container {container_id} to network {network_name}: {str(e)}", exc_info=True)
 
     def add_stack(self, name: str, config_file: str, running: int, exited: int, total: int) -> None:
         """Add or update a stack section in the container list.
@@ -667,6 +1085,18 @@ class ContainerList(VerticalScroll):
         if self._is_updating and self._pending_clear:
             try:
                 mount_start = time.time()
+                
+                # Ensure section headers exist
+                self._ensure_section_headers()
+                
+                # Prepare all containers
+                network_containers = {}
+                for network_name in sorted(self.network_headers.keys()):
+                    header = self.network_headers[network_name]
+                    table = self.network_tables[network_name]
+                    network_container = Container(classes="network-container")
+                    network_containers[network_name] = (network_container, header, table)
+                
                 stack_containers = {}
                 for stack_name in sorted(self.stack_headers.keys()):
                     header = self.stack_headers[stack_name]
@@ -674,11 +1104,23 @@ class ContainerList(VerticalScroll):
                     stack_container = Container(classes="stack-container")
                     stack_containers[stack_name] = (stack_container, header, table)
 
-                for stack_name, (container, header, table) in stack_containers.items():
-                    self.mount(container)
-                    container.mount(header)
-                    container.mount(table)
-                    table.styles.display = "block" if header.expanded else "none"
+                # Mount stacks section
+                if stack_containers:
+                    self.mount(self.stacks_section_header)
+                    for stack_name, (container, header, table) in stack_containers.items():
+                        self.mount(container)
+                        container.mount(header)
+                        container.mount(table)
+                        table.styles.display = "block" if header.expanded else "none"
+                
+                # Mount networks section
+                if network_containers:
+                    self.mount(self.networks_section_header)
+                    for network_name, (container, header, table) in network_containers.items():
+                        self.mount(container)
+                        container.mount(header)
+                        container.mount(table)
+                        table.styles.display = "block" if header.expanded else "none"
 
                 self._pending_clear = False
 
@@ -688,9 +1130,36 @@ class ContainerList(VerticalScroll):
                     elif self.current_focus in self.stack_tables:
                         self.stack_tables[self.current_focus].focus()
                 mount_end = time.time()
-                logger.info(f"[PERF] Emergency mounting of all stacks took {mount_end - mount_start:.3f}s")
+                logger.info(f"[PERF] Emergency mounting of all content took {mount_end - mount_start:.3f}s")
             except Exception as e:
                 logger.error(f"Error mounting widgets: {str(e)}", exc_info=True)
+
+    def action_toggle_item(self) -> None:
+        """Toggle the visibility of the selected item (network or stack)."""
+        # Check if a network header has focus
+        for network_name, header in self.network_headers.items():
+            if header.has_focus:
+                table = self.network_tables[network_name]
+                header.toggle()
+                table.styles.display = "block" if header.expanded else "none"
+                return
+        
+        # Check if a stack header has focus
+        for stack_name, header in self.stack_headers.items():
+            if header.has_focus:
+                table = self.stack_tables[stack_name]
+                header.toggle()
+                table.styles.display = "block" if header.expanded else "none"
+                return
+
+    def action_toggle_network(self) -> None:
+        """Toggle the visibility of the selected network's container table."""
+        for network_name, header in self.network_headers.items():
+            if header.has_focus:
+                table = self.network_tables[network_name]
+                header.toggle()
+                table.styles.display = "block" if header.expanded else "none"
+                break
 
     def action_toggle_stack(self) -> None:
         """Toggle the visibility of the selected stack's container table."""
@@ -733,6 +1202,33 @@ class ContainerList(VerticalScroll):
         except Exception as e:
             logger.error(f"Error during ContainerList mount: {str(e)}", exc_info=True)
             raise
+
+    def select_network(self, network_name: str) -> None:
+        """Select a network and update the footer.
+
+        Args:
+            network_name: Name of the network to select
+        """
+        if network_name in self.network_headers:
+            # Clear any previous selection
+            self.selected_item = ("network", network_name)
+            self.selected_container_data = None
+            self.selected_stack_data = None
+
+            # Store network data for footer display
+            header = self.network_headers[network_name]
+            self.selected_network_data = {
+                "name": network_name,
+                "driver": header.driver,
+                "scope": header.scope,
+                "subnet": header.subnet,
+                "total_containers": header.total_containers,
+                "connected_stacks": header.connected_stacks
+            }
+
+            # Update the footer and cursor visibility
+            self._update_footer_with_selection()
+            self._update_cursor_visibility()
 
     def select_stack(self, stack_name: str) -> None:
         """Select a stack and update the footer.
@@ -837,7 +1333,30 @@ class ContainerList(VerticalScroll):
             item_type, item_id = self.selected_item
             logger.info(f"Updating footer with selection: {item_type} - {item_id}")
 
-            if item_type == "stack" and self.selected_stack_data:
+            if item_type == "network" and self.selected_network_data:
+                network_data = self.selected_network_data
+                from rich.text import Text
+                from rich.style import Style
+
+                # Create a rich text object with styled components
+                selection_text = Text()
+                selection_text.append("Current Selection:", Style(color="black", bgcolor="yellow"))
+                selection_text.append("  Network: ", Style(color="white"))
+                selection_text.append(f"{network_data['name']}", Style(color="cyan", bold=True))
+                selection_text.append(" | ", Style(color="white"))
+                selection_text.append(f"Driver: ", Style(color="white"))
+                selection_text.append(f"{network_data['driver']}", Style(color="blue", bold=True))
+                selection_text.append(" | ", Style(color="white"))
+                selection_text.append(f"Scope: ", Style(color="white"))
+                selection_text.append(f"{network_data['scope']}", Style(color="magenta", bold=True))
+                selection_text.append(" | ", Style(color="white"))
+                selection_text.append(f"Containers: ", Style(color="white"))
+                selection_text.append(f"{network_data['total_containers']}", Style(color="green", bold=True))
+
+                logger.info(f"Updating status bar with network: {network_data['name']}")
+                status_bar.update(selection_text)
+
+            elif item_type == "stack" and self.selected_stack_data:
                 stack_data = self.selected_stack_data
                 from rich.text import Text
                 from rich.style import Style
@@ -967,6 +1486,16 @@ class ContainerList(VerticalScroll):
                 except Exception as e:
                     logger.error(f"Error handling row selection: {str(e)}", exc_info=True)
                 break
+
+    def on_network_header_selected(self, event) -> None:
+        """Handle NetworkHeader selection events."""
+        header = event.network_header
+        self.select_network(header.network_name)
+
+    def on_network_header_clicked(self, event) -> None:
+        """Handle NetworkHeader click events."""
+        header = event.network_header
+        self.select_network(header.network_name)
 
     def on_stack_header_selected(self, event) -> None:
         """Handle StackHeader selection events."""

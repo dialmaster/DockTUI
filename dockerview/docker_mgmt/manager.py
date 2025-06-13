@@ -244,6 +244,85 @@ class DockerManager:
             self.last_error = error_msg
             return False
 
+    def get_networks(self) -> Dict[str, Dict]:
+        """Retrieve all Docker networks with their connected containers and stacks.
+
+        Returns:
+            Dict[str, Dict]: A dictionary mapping network names to their details including:
+                - id: Network short ID
+                - name: Network name
+                - driver: Network driver (bridge, overlay, host, etc.)
+                - scope: Network scope (local, swarm)
+                - subnet: Network subnet/IP range
+                - connected_containers: List of connected container info
+                - connected_stacks: Set of stack names using this network
+                - total_containers: Total number of connected containers
+        """
+        networks = {}
+        try:
+            docker_networks = self.client.networks.list()
+            
+            for network in docker_networks:
+                try:
+                    # Reload the network to get detailed information including containers
+                    network.reload()
+                    
+                    # Get network configuration details
+                    config = network.attrs.get('IPAM', {}).get('Config', [])
+                    subnet = config[0].get('Subnet', 'N/A') if config else 'N/A'
+                    
+                    # Get connected containers
+                    connected_containers = []
+                    connected_stacks = set()
+                    
+                    containers = network.attrs.get('Containers', {})
+                    logger.debug(f"Network {network.name} has {len(containers)} connected containers")
+                    
+                    for container_id, container_info in containers.items():
+                        try:
+                            # Get the actual container object to access labels
+                            container_obj = self.client.containers.get(container_id)
+                            container_name = container_info.get('Name', container_obj.name)
+                            
+                            # Determine stack from container labels
+                            stack_name = container_obj.labels.get('com.docker.compose.project', 'ungrouped')
+                            connected_stacks.add(stack_name)
+                            
+                            container_data = {
+                                'id': container_id[:12],
+                                'name': container_name,
+                                'stack': stack_name,
+                                'ip': container_info.get('IPv4Address', '').split('/')[0] if container_info.get('IPv4Address') else 'N/A'
+                            }
+                            connected_containers.append(container_data)
+                            logger.debug(f"Added container to network {network.name}: {container_data}")
+                        except Exception as container_error:
+                            logger.error(f"Error processing connected container {container_id}: {str(container_error)}", exc_info=True)
+                            continue
+                    
+                    networks[network.name] = {
+                        'id': network.short_id,
+                        'name': network.name,
+                        'driver': network.attrs.get('Driver', 'unknown'),
+                        'scope': network.attrs.get('Scope', 'local'),
+                        'subnet': subnet,
+                        'connected_containers': connected_containers,
+                        'connected_stacks': connected_stacks,
+                        'total_containers': len(connected_containers)
+                    }
+                    
+                except Exception as network_error:
+                    logger.error(f"Error processing network {network.name}: {str(network_error)}", exc_info=True)
+                    continue
+                    
+        except Exception as e:
+            error_msg = f"Error getting networks: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            self.last_error = error_msg
+            return {}
+            
+        return networks
+
     def execute_stack_command(self, stack_name: str, config_file: str, command: str) -> bool:
         """Execute a command on a Docker Compose stack.
 
