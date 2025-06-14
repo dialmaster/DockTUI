@@ -46,6 +46,70 @@ That's it! The `start.sh` script will handle dependency installation via Poetry 
 ./start.sh --help    # Show help
 ```
 
+## Configuration
+
+dockerview supports configuration via a YAML file to customize various settings, particularly for log viewing performance.
+
+### Configuration File Location
+
+dockerview looks for configuration files in the following order:
+1. Path specified in `DOCKERVIEW_CONFIG` environment variable
+2. `./dockerview.yaml` in the current directory (a default file is provided)
+3. `~/.config/dockerview/dockerview.yaml` (created automatically with defaults if not found)
+
+A default `dockerview.yaml` configuration file is included in the repository that you can customize.
+
+### Configuration Options
+
+The default configuration file contains:
+
+```yaml
+# DockerView Configuration File
+# This file controls various settings for the DockerView application
+
+# Log Display Settings
+log:
+  # Maximum number of log lines to keep in memory per container/stack
+  # Higher values use more memory but allow viewing more history
+  # Default: 4000
+  max_lines: 4000
+  
+  # Number of log lines to initially fetch when viewing a container/stack
+  # Lower values load faster but show less history
+  # Default: 400
+  tail: 400
+  
+  # Time range of logs to fetch (e.g., '15m', '1h', '24h')
+  # Only logs from this time period will be shown initially
+  # This significantly improves performance for long-running containers
+  # Default: '30m'
+  since: '30m'
+```
+
+### Environment Variable Overrides
+
+You can override any configuration value using environment variables:
+- `DOCKERVIEW_LOG_MAX_LINES` - Override `log.max_lines`
+- `DOCKERVIEW_LOG_TAIL` - Override `log.tail`
+- `DOCKERVIEW_LOG_SINCE` - Override `log.since`
+
+Example:
+```bash
+export DOCKERVIEW_LOG_TAIL=500
+export DOCKERVIEW_LOG_SINCE=1h
+./start.sh
+```
+
+### Performance Tuning
+
+The log settings significantly impact performance when viewing containers with extensive log output:
+
+- **For faster initial load times**: Use lower `tail` values (e.g., 100-200) and shorter `since` durations (e.g., '5m', '15m')
+- **For more log history**: Increase `tail` (e.g., 1000) and `since` (e.g., '1h', '24h'), but expect slower initial loading
+- **Memory usage**: The `max_lines` setting caps the total lines kept in memory. Lower values use less memory but limit scrollback
+
+When no logs are found within the configured time range, dockerview will display an informative message explaining the configuration settings and continue waiting for new logs.
+
 ## Keyboard Shortcuts
 
 ### Navigation

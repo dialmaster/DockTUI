@@ -1,0 +1,25 @@
+# DockerView Configuration File
+# This file controls various settings for the DockerView application
+
+# Log Display Settings
+log:
+  # Maximum number of log lines to keep in memory per container/stack
+  # Higher values use more memory but allow viewing more history
+  # Default: 4000
+  max_lines: 4000
+
+  # Number of log lines to initially fetch when viewing a container/stack
+  # Lower values load faster but show less history
+  # Default: 400
+  tail: 400
+
+  # Time range of logs to fetch (e.g., '15m', '1h', '24h')
+  # Only logs from this time period will be shown initially
+  # This significantly improves performance for long-running containers
+  # Default: '30m'
+  since: '30m'
+
+# Note: You can also override these settings with environment variables:
+# - DOCKERVIEW_LOG_MAX_LINES
+# - DOCKERVIEW_LOG_TAIL
+# - DOCKERVIEW_LOG_SINCE
