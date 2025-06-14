@@ -1,5 +1,4 @@
 import logging
-import time
 from textual.widgets import DataTable, Static
 from textual.binding import Binding
 from textual.containers import VerticalScroll, Container
@@ -10,6 +9,14 @@ from rich.console import RenderableType
 from textual.message import Message
 
 logger = logging.getLogger('dockerview.containers')
+
+class SelectionChanged(Message):
+    """Message sent when the selection changes in the container list."""
+    def __init__(self, item_type: str, item_id: str, item_data: dict):
+        self.item_type = item_type
+        self.item_id = item_id
+        self.item_data = item_data
+        super().__init__()
 
 class SectionHeader(Static):
     """A section header widget for grouping related items (Networks, Stacks, etc.).
@@ -23,7 +30,7 @@ class SectionHeader(Static):
         color: $text;
         padding: 0 1;
         height: 1;
-        margin: 1 0 0 0;
+        margin: 2 0 0 0;
         text-style: bold;
         text-align: center;
     }
@@ -87,7 +94,7 @@ class NetworkHeader(Static):
             self.network_header = network_header
             super().__init__()
 
-    def __init__(self, network_name: str, driver: str, scope: str, subnet: str, 
+    def __init__(self, network_name: str, driver: str, scope: str, subnet: str,
                  total_containers: int, connected_stacks: set):
         """Initialize the network header.
 
@@ -114,9 +121,8 @@ class NetworkHeader(Static):
     def _update_content(self) -> None:
         """Update the header's displayed content based on current state."""
         icon = "▼" if self.expanded else "▶"
-        
+
         # Format connected stacks list
-        logger.debug(f"Network {self.network_name} connected_stacks: {self.connected_stacks}")
         if self.connected_stacks:
             stacks_text = ", ".join(sorted(self.connected_stacks))
             if len(stacks_text) > 40:
@@ -158,7 +164,16 @@ class NetworkHeader(Static):
         self.post_message(self.Clicked(self))
 
         if current_time - self._last_click_time < 0.5:
-            self.focus()
+            # Check if the search input is currently focused
+            # If it is, don't steal focus from it
+            if self.screen and self.screen.focused:
+                focused_widget = self.screen.focused
+                if not (hasattr(focused_widget, 'id') and focused_widget.id == "search-input"):
+                    # Focus the header only if search input is not focused
+                    self.focus()
+            else:
+                self.focus()
+
             if self.screen:
                 container_list = self.screen.query_one("ContainerList")
                 container_list.action_toggle_network()
@@ -281,7 +296,16 @@ class StackHeader(Static):
         self.post_message(self.Clicked(self))
 
         if current_time - self._last_click_time < 0.5:
-            self.focus()
+            # Check if the search input is currently focused
+            # If it is, don't steal focus from it
+            if self.screen and self.screen.focused:
+                focused_widget = self.screen.focused
+                if not (hasattr(focused_widget, 'id') and focused_widget.id == "search-input"):
+                    # Focus the header only if search input is not focused
+                    self.focus()
+            else:
+                self.focus()
+
             if self.screen:
                 container_list = self.screen.query_one("ContainerList")
                 container_list.action_toggle_stack()
@@ -383,17 +407,17 @@ class ContainerList(VerticalScroll):
             self.network_headers = {}  # Dictionary to store headers for each network
             self.network_rows = {}  # Dictionary to track container rows by network/container ID
             self.expanded_networks = set()  # Keep track of which networks are expanded
-            
+
             # Stack components
             self.stack_tables = {}  # Dictionary to store tables for each stack
             self.stack_headers = {}  # Dictionary to store headers for each stack
             self.container_rows = {}  # Dictionary to track container rows by ID
             self.expanded_stacks = set()  # Keep track of which stacks are expanded
-            
+
             # Section headers
             self.networks_section_header = None
             self.stacks_section_header = None
-            
+
             # General state
             self.current_focus = None
             self._is_updating = False  # Track if we're in a batch update
@@ -433,7 +457,6 @@ class ContainerList(VerticalScroll):
         table.show_cursor = True
         table.watch_cursor = True
 
-        logger.info(f"Created network table for {network_name} with cursor_type={table.cursor_type}, show_cursor={table.show_cursor}")
 
         return table
 
@@ -443,7 +466,7 @@ class ContainerList(VerticalScroll):
             self.stacks_section_header = SectionHeader("📦 DOCKER COMPOSE STACKS")
             # Remove top margin for the first section header
             self.stacks_section_header.styles.margin = (0, 0, 0, 0)
-        
+
         if self.networks_section_header is None:
             self.networks_section_header = SectionHeader("🌐 DOCKER NETWORKS")
 
@@ -472,27 +495,21 @@ class ContainerList(VerticalScroll):
         table.show_cursor = True  # Always show cursor
         table.watch_cursor = True
 
-        logger.info(f"Created table for stack {stack_name} with cursor_type={table.cursor_type}, show_cursor={table.show_cursor}")
 
         return table
 
     def begin_update(self) -> None:
         """Begin a batch update to prevent UI flickering during data updates."""
-        logger.info("[PERF] ContainerList.begin_update() started")
-        start_time = time.time()
 
         self._is_updating = True
         # Only set pending_clear if we have no children yet
         self._pending_clear = len(self.children) == 0
 
         # Clear all tables to ensure fresh data
-        clear_tables_start = time.time()
         for table in self.network_tables.values():
             table.clear()
         for table in self.stack_tables.values():
             table.clear()
-        clear_tables_end = time.time()
-        logger.info(f"[PERF] Clearing tables took {clear_tables_end - clear_tables_start:.3f}s")
 
         # Clear the tracking dictionaries to ensure we properly update all data
         self.container_rows.clear()
@@ -505,31 +522,24 @@ class ContainerList(VerticalScroll):
         # Ensure section headers are created
         self._ensure_section_headers()
 
-        end_time = time.time()
-        logger.info(f"[PERF] ContainerList.begin_update() completed in {end_time - start_time:.3f}s")
 
     def end_update(self) -> None:
         """End a batch update and apply pending changes to the UI."""
-        logger.info("[PERF] ContainerList.end_update() started")
-        start_time = time.time()
 
         try:
             # First, clean up networks and stacks that no longer exist in the Docker data
-            cleanup_start = time.time()
-            
+
             # Networks cleanup
             networks_to_remove = []
             for network_name in list(self.network_headers.keys()):
                 if network_name not in self._networks_in_new_data:
                     networks_to_remove.append(network_name)
-                    logger.info(f"Removing network that no longer exists: {network_name}")
-            
+
             # Stacks cleanup
             stacks_to_remove = []
             for stack_name in list(self.stack_headers.keys()):
                 if stack_name not in self._stacks_in_new_data:
                     stacks_to_remove.append(stack_name)
-                    logger.info(f"Removing stack that no longer exists: {stack_name}")
 
             # More efficient: collect all containers to remove in one pass
             containers_to_remove = {}  # stack_name -> [container_ids]
@@ -598,11 +608,8 @@ class ContainerList(VerticalScroll):
                     self.selected_item = None
                     self.selected_container_data = None
 
-            cleanup_end = time.time()
-            logger.info(f"[PERF] Stack cleanup took {cleanup_end - cleanup_start:.3f}s")
 
             # Then, determine what needs to be added, updated, or removed
-            prepare_start = time.time()
 
             # Track existing and new containers (both networks and stacks)
             existing_network_containers = {}
@@ -646,24 +653,18 @@ class ContainerList(VerticalScroll):
                     stack_container = Container(classes="stack-container")
                     new_stack_containers[stack_name] = (stack_container, header, table)
 
-            prepare_end = time.time()
-            logger.info(f"[PERF] Preparing containers took {prepare_end - prepare_start:.3f}s")
 
             # If we need to clear everything, do it all at once
             if self._pending_clear:
-                clear_start = time.time()
                 self.remove_children()
-                clear_end = time.time()
-                logger.info(f"[PERF] Clearing ContainerList took {clear_end - clear_start:.3f}s")
                 self._pending_clear = False
 
                 # Ensure section headers exist
                 self._ensure_section_headers()
 
                 # Mount all containers at once (stacks first, then networks)
-                mount_start = time.time()
-                
-                # Mount stacks section  
+
+                # Mount stacks section
                 if new_stack_containers or self.stack_headers:
                     self.mount(self.stacks_section_header)
                     for stack_name, (stack_container, header, table) in new_stack_containers.items():
@@ -671,7 +672,7 @@ class ContainerList(VerticalScroll):
                         stack_container.mount(header)
                         stack_container.mount(table)
                         table.styles.display = "block" if header.expanded else "none"
-                
+
                 # Mount networks section
                 if new_network_containers or self.network_headers:
                     self.mount(self.networks_section_header)
@@ -680,13 +681,10 @@ class ContainerList(VerticalScroll):
                         network_container.mount(header)
                         network_container.mount(table)
                         table.styles.display = "block" if header.expanded else "none"
-                
-                mount_end = time.time()
+
                 total_containers = len(new_network_containers) + len(new_stack_containers)
-                logger.info(f"[PERF] Mounting {total_containers} containers took {mount_end - mount_start:.3f}s")
             else:
                 # Update existing containers and add new ones
-                update_start = time.time()
 
                 # First update all existing network containers (in place)
                 for network_name, container in existing_network_containers.items():
@@ -736,7 +734,7 @@ class ContainerList(VerticalScroll):
                 # Mount section headers if needed
                 if (new_stack_containers or self.stack_headers) and not stacks_header_exists:
                     self.mount(self.stacks_section_header)
-                    
+
                 if (new_network_containers or self.network_headers) and not networks_header_exists:
                     self.mount(self.networks_section_header)
 
@@ -746,40 +744,28 @@ class ContainerList(VerticalScroll):
                     stack_container.mount(header)
                     stack_container.mount(table)
                     table.styles.display = "block" if header.expanded else "none"
-                        
+
                 for network_name, (network_container, header, table) in new_network_containers.items():
                     self.mount(network_container)
                     network_container.mount(header)
                     network_container.mount(table)
                     table.styles.display = "block" if header.expanded else "none"
 
-                update_end = time.time()
-                logger.info(f"[PERF] Updating containers took {update_end - update_start:.3f}s")
 
             # Restore selection and focus
-            focus_start = time.time()
             self._restore_selection()
 
             # Update cursor visibility based on the restored selection
             self._update_cursor_visibility()
 
-            focus_end = time.time()
-            logger.info(f"[PERF] Restoring selection and focus took {focus_end - focus_start:.3f}s")
 
             self._is_updating = False
         finally:
-            refresh_start = time.time()
             if len(self.children) > 0:
-                logger.info("[PERF] About to call self.refresh()")
                 self.refresh()
-                logger.info("[PERF] self.refresh() completed")
-            refresh_end = time.time()
-            logger.info(f"[PERF] Final refresh took {refresh_end - refresh_start:.3f}s")
 
             self._is_updating = False
 
-        end_time = time.time()
-        logger.info(f"[PERF] ContainerList.end_update() completed in {end_time - start_time:.3f}s")
 
     def _restore_selection(self) -> None:
         """Restore the previously selected item after a refresh."""
@@ -787,6 +773,16 @@ class ContainerList(VerticalScroll):
             if self.selected_item is None:
                 # No selection to restore
                 return
+
+            # Check if the search input is currently focused
+            # If it is, don't steal focus from it
+            if self.screen and self.screen.focused:
+                focused_widget = self.screen.focused
+                # Check if the focused widget is the search input
+                if hasattr(focused_widget, 'id') and focused_widget.id == "search-input":
+                    # Still update the selection state but don't focus
+                    self._update_footer_with_selection()
+                    return
 
             item_type, item_id = self.selected_item
 
@@ -820,11 +816,8 @@ class ContainerList(VerticalScroll):
 
     def clear(self) -> None:
         """Clear all stacks and containers while preserving expansion states."""
-        logger.info("[PERF] ContainerList.clear() started")
-        start_time = time.time()
 
         # Save expanded states before clearing
-        save_state_start = time.time()
         self.expanded_stacks = {
             name for name, header in self.stack_headers.items()
             if header.expanded
@@ -835,20 +828,13 @@ class ContainerList(VerticalScroll):
             self.current_focus = next(name for name, header in self.stack_headers.items() if header == focused)
         elif focused in self.stack_tables.values():
             self.current_focus = next(name for name, table in self.stack_tables.items() if table == focused)
-        save_state_end = time.time()
-        logger.info(f"[PERF] Saving state took {save_state_end - save_state_start:.3f}s")
 
         # Clear all widgets
-        clear_start = time.time()
         self.stack_tables.clear()
         self.stack_headers.clear()
         self.container_rows.clear()  # Clear container row tracking
         self.remove_children()
-        clear_end = time.time()
-        logger.info(f"[PERF] Clearing widgets took {clear_end - clear_start:.3f}s")
 
-        end_time = time.time()
-        logger.info(f"[PERF] ContainerList.clear() completed in {end_time - start_time:.3f}s")
 
     def add_network(self, network_data: dict) -> None:
         """Add or update a network section in the container list.
@@ -857,7 +843,7 @@ class ContainerList(VerticalScroll):
             network_data: Dictionary containing network information
         """
         network_name = network_data['name']
-        
+
         # Track that this network exists in the new data
         self._networks_in_new_data.add(network_name)
 
@@ -881,15 +867,12 @@ class ContainerList(VerticalScroll):
 
             # Create and mount the container immediately unless we're in a batch update
             if not self._is_updating:
-                mount_start = time.time()
                 network_container = Container(classes="network-container")
                 self.mount(network_container)
                 network_container.mount(header)
                 network_container.mount(table)
                 # Ensure proper display state
                 table.styles.display = "block" if header.expanded else "none"
-                mount_end = time.time()
-                logger.info(f"[PERF] Mounting single network {network_name} took {mount_end - mount_start:.3f}s")
 
             # Update selected network data if this is the selected network
             if self.selected_item and self.selected_item[0] == "network" and self.selected_item[1] == network_name:
@@ -965,15 +948,12 @@ class ContainerList(VerticalScroll):
 
             # Create and mount the container immediately unless we're in a batch update
             if not self._is_updating:
-                mount_start = time.time()
                 stack_container = Container(classes="stack-container")
                 self.mount(stack_container)
                 stack_container.mount(header)
                 stack_container.mount(table)
                 # Ensure proper display state
                 table.styles.display = "block" if header.expanded else "none"
-                mount_end = time.time()
-                logger.info(f"[PERF] Mounting single stack {name} took {mount_end - mount_start:.3f}s")
 
             # Update selected stack data if this is the selected stack
             if self.selected_item and self.selected_item[0] == "stack" and self.selected_item[1] == name:
@@ -1084,11 +1064,10 @@ class ContainerList(VerticalScroll):
 
         if self._is_updating and self._pending_clear:
             try:
-                mount_start = time.time()
-                
+
                 # Ensure section headers exist
                 self._ensure_section_headers()
-                
+
                 # Prepare all containers
                 network_containers = {}
                 for network_name in sorted(self.network_headers.keys()):
@@ -1096,7 +1075,7 @@ class ContainerList(VerticalScroll):
                     table = self.network_tables[network_name]
                     network_container = Container(classes="network-container")
                     network_containers[network_name] = (network_container, header, table)
-                
+
                 stack_containers = {}
                 for stack_name in sorted(self.stack_headers.keys()):
                     header = self.stack_headers[stack_name]
@@ -1112,7 +1091,7 @@ class ContainerList(VerticalScroll):
                         container.mount(header)
                         container.mount(table)
                         table.styles.display = "block" if header.expanded else "none"
-                
+
                 # Mount networks section
                 if network_containers:
                     self.mount(self.networks_section_header)
@@ -1125,12 +1104,22 @@ class ContainerList(VerticalScroll):
                 self._pending_clear = False
 
                 if self.current_focus:
-                    if self.current_focus in self.stack_headers:
-                        self.stack_headers[self.current_focus].focus()
-                    elif self.current_focus in self.stack_tables:
-                        self.stack_tables[self.current_focus].focus()
-                mount_end = time.time()
-                logger.info(f"[PERF] Emergency mounting of all content took {mount_end - mount_start:.3f}s")
+                    # Check if the search input is currently focused
+                    # If it is, don't steal focus from it
+                    if self.screen and self.screen.focused:
+                        focused_widget = self.screen.focused
+                        if hasattr(focused_widget, 'id') and focused_widget.id == "search-input":
+                            pass  # Search input is focused, don't steal focus
+                        else:
+                            if self.current_focus in self.stack_headers:
+                                self.stack_headers[self.current_focus].focus()
+                            elif self.current_focus in self.stack_tables:
+                                self.stack_tables[self.current_focus].focus()
+                    else:
+                        if self.current_focus in self.stack_headers:
+                            self.stack_headers[self.current_focus].focus()
+                        elif self.current_focus in self.stack_tables:
+                            self.stack_tables[self.current_focus].focus()
             except Exception as e:
                 logger.error(f"Error mounting widgets: {str(e)}", exc_info=True)
 
@@ -1143,7 +1132,7 @@ class ContainerList(VerticalScroll):
                 header.toggle()
                 table.styles.display = "block" if header.expanded else "none"
                 return
-        
+
         # Check if a stack header has focus
         for stack_name, header in self.stack_headers.items():
             if header.has_focus:
@@ -1173,32 +1162,36 @@ class ContainerList(VerticalScroll):
     def on_mount(self) -> None:
         """Handle initial widget mount by focusing and expanding the first stack."""
         try:
+            # Check if the search input is currently focused
+            # If it is, don't steal focus from it
+            should_focus = True
+            if self.screen and self.screen.focused:
+                focused_widget = self.screen.focused
+                if hasattr(focused_widget, 'id') and focused_widget.id == "search-input":
+                    should_focus = False
+
             headers = list(self.stack_headers.values())
             if headers:
                 first_header = headers[0]
-                first_header.focus()
+                if should_focus:
+                    first_header.focus()
                 first_header.expanded = True
                 first_table = self.stack_tables[first_header.stack_name]
                 first_table.styles.display = "block"
 
-                # Log the state of all tables for debugging
-                for stack_name, table in self.stack_tables.items():
-                    logger.info(f"Table for stack {stack_name}: cursor_type={table.cursor_type}, show_cursor={table.show_cursor}")
-
                 # If there are rows in the first table, select the first container
                 if first_table.row_count > 0:
-                    first_table.focus()
+                    if should_focus:
+                        first_table.focus()
                     first_table.move_cursor(row=0)
 
                     # Get the container ID from the first row
                     container_id = first_table.get_cell_at((0, 0))
                     if container_id:
                         self.select_container(container_id)
-                        logger.info(f"Selected first container: {container_id}")
                 else:
                     # If no containers, select the stack
                     self.select_stack(first_header.stack_name)
-                    logger.info(f"Selected first stack: {first_header.stack_name}")
         except Exception as e:
             logger.error(f"Error during ContainerList mount: {str(e)}", exc_info=True)
             raise
@@ -1230,6 +1223,9 @@ class ContainerList(VerticalScroll):
             self._update_footer_with_selection()
             self._update_cursor_visibility()
 
+            # Post selection change message
+            self.post_message(SelectionChanged("network", network_name, self.selected_network_data))
+
     def select_stack(self, stack_name: str) -> None:
         """Select a stack and update the footer.
 
@@ -1255,13 +1251,15 @@ class ContainerList(VerticalScroll):
             self._update_footer_with_selection()
             self._update_cursor_visibility()
 
+            # Post selection change message
+            self.post_message(SelectionChanged("stack", stack_name, self.selected_stack_data))
+
     def select_container(self, container_id: str) -> None:
         """Select a container and update the footer.
 
         Args:
             container_id: ID of the container to select
         """
-        logger.info(f"Selecting container: {container_id}")
         if container_id in self.container_rows:
             # Clear any previous selection
             self.selected_item = ("container", container_id)
@@ -1284,7 +1282,6 @@ class ContainerList(VerticalScroll):
             }
 
             self.selected_container_data = container_data
-            logger.info(f"Container data: {container_data}")
 
             # Make sure the stack is expanded
             header = self.stack_headers[stack_name]
@@ -1293,13 +1290,26 @@ class ContainerList(VerticalScroll):
                 table.styles.display = "block"
                 header._update_content()
 
-            # Focus the table and position the cursor
-            table.focus()
-
-            # Position the cursor on the selected row
-            if table.cursor_row != row_idx:
-                table.move_cursor(row=row_idx)
-                logger.info(f"Moved cursor to row {row_idx}")
+            # Check if the search input is currently focused
+            # If it is, don't steal focus from it
+            if self.screen and self.screen.focused:
+                focused_widget = self.screen.focused
+                if hasattr(focused_widget, 'id') and focused_widget.id == "search-input":
+                    # Still position the cursor on the selected row without focusing
+                    if table.cursor_row != row_idx:
+                        table.move_cursor(row=row_idx)
+                else:
+                    # Focus the table and position the cursor
+                    table.focus()
+                    # Position the cursor on the selected row
+                    if table.cursor_row != row_idx:
+                        table.move_cursor(row=row_idx)
+            else:
+                # Focus the table and position the cursor
+                table.focus()
+                # Position the cursor on the selected row
+                if table.cursor_row != row_idx:
+                    table.move_cursor(row=row_idx)
 
             # Force a refresh of the table to ensure the cursor is visible
             table.refresh()
@@ -1307,8 +1317,10 @@ class ContainerList(VerticalScroll):
             # Update the footer with selection
             self._update_footer_with_selection()
 
+            # Post selection change message
+            self.post_message(SelectionChanged("container", container_id, self.selected_container_data))
+
             # Log the current state for debugging
-            logger.info(f"Table cursor_type: {table.cursor_type}, show_cursor: {table.show_cursor}, cursor_row: {table.cursor_row}")
         else:
             logger.error(f"Container ID {container_id} not found in container_rows")
 
@@ -1323,15 +1335,16 @@ class ContainerList(VerticalScroll):
 
             if self.selected_item is None:
                 # Clear the status bar
-                logger.info("No selection, clearing status bar")
                 from rich.text import Text
                 from rich.style import Style
                 no_selection_text = Text("No selection", Style(color="white", bold=True))
                 status_bar.update(no_selection_text)
+
+                # Post a message to clear log pane selection
+                self.post_message(SelectionChanged("none", "", {}))
                 return
 
             item_type, item_id = self.selected_item
-            logger.info(f"Updating footer with selection: {item_type} - {item_id}")
 
             if item_type == "network" and self.selected_network_data:
                 network_data = self.selected_network_data
@@ -1353,7 +1366,6 @@ class ContainerList(VerticalScroll):
                 selection_text.append(f"Containers: ", Style(color="white"))
                 selection_text.append(f"{network_data['total_containers']}", Style(color="green", bold=True))
 
-                logger.info(f"Updating status bar with network: {network_data['name']}")
                 status_bar.update(selection_text)
 
             elif item_type == "stack" and self.selected_stack_data:
@@ -1376,7 +1388,6 @@ class ContainerList(VerticalScroll):
                 selection_text.append(f"Total: ", Style(color="white"))
                 selection_text.append(f"{stack_data['total']}", Style(color="cyan", bold=True))
 
-                logger.info(f"Updating status bar with stack: {stack_data['name']}")
                 status_bar.update(selection_text)
 
             elif item_type == "container" and self.selected_container_data:
@@ -1414,7 +1425,6 @@ class ContainerList(VerticalScroll):
                     selection_text.append("Memory: ", Style(color="white"))
                     selection_text.append(f"{container_data['memory']}", Style(color="magenta", bold=True))
 
-                logger.info(f"Updating status bar with container: {container_data['name']}")
                 status_bar.update(selection_text)
 
             else:
@@ -1435,6 +1445,14 @@ class ContainerList(VerticalScroll):
         and ensure the cursor is positioned on the correct row.
         """
         try:
+            # Check if the search input is currently focused
+            # If it is, don't steal focus from it
+            if self.screen and self.screen.focused:
+                focused_widget = self.screen.focused
+                # Check if the focused widget is the search input
+                if hasattr(focused_widget, 'id') and focused_widget.id == "search-input":
+                    return
+
             # If a container is selected, focus its table and position the cursor
             if self.selected_item and self.selected_item[0] == "container":
                 container_id = self.selected_item[1]
@@ -1450,7 +1468,6 @@ class ContainerList(VerticalScroll):
                         if table.cursor_row != row_idx:
                             table.move_cursor(row=row_idx)
 
-                        logger.info(f"Focused table for stack: {stack_name} and positioned cursor at row: {row_idx}")
 
             # If a stack is selected, focus its header
             elif self.selected_item and self.selected_item[0] == "stack":
@@ -1458,7 +1475,6 @@ class ContainerList(VerticalScroll):
                 if stack_name in self.stack_headers:
                     header = self.stack_headers[stack_name]
                     header.focus()
-                    logger.info(f"Focused header for stack: {stack_name}")
 
         except Exception as e:
             logger.error(f"Error updating cursor visibility and focus: {str(e)}", exc_info=True)
@@ -1468,8 +1484,6 @@ class ContainerList(VerticalScroll):
         table = event.data_table
         row_key = event.row_key
 
-        logger.info(f"DataTable.RowSelected event received: {event}")
-        logger.info(f"Row selected: {row_key}, cursor_row: {event.cursor_row}")
 
         # Find which stack this table belongs to
         for stack_name, stack_table in self.stack_tables.items():
@@ -1479,7 +1493,6 @@ class ContainerList(VerticalScroll):
                     row = table.get_row_index(row_key)
                     if row is not None and row < table.row_count:
                         container_id = table.get_cell_at((row, 0))
-                        logger.info(f"Container selected via RowSelected event: {container_id}")
 
                         # Select the container to update the status bar
                         self.select_container(container_id)
@@ -1510,6 +1523,12 @@ class ContainerList(VerticalScroll):
     def action_cursor_up(self) -> None:
         """Handle up arrow key."""
         current = self.screen.focused
+
+        # Check if the search input is currently focused
+        # If it is, don't process navigation
+        if hasattr(current, 'id') and current.id == "search-input":
+            return
+
         if isinstance(current, DataTable):
             # If we're at the top of the table, focus the header
             if current.cursor_row == 0:
@@ -1543,6 +1562,12 @@ class ContainerList(VerticalScroll):
     def action_cursor_down(self) -> None:
         """Handle down arrow key."""
         current = self.screen.focused
+
+        # Check if the search input is currently focused
+        # If it is, don't process navigation
+        if hasattr(current, 'id') and current.id == "search-input":
+            return
+
         if isinstance(current, DataTable):
             # If we're at the bottom of the table, focus the next header
             if current.cursor_row >= current.row_count - 1:
@@ -1589,7 +1614,6 @@ class ContainerList(VerticalScroll):
                     row = table.cursor_row
                     if row is not None and row < table.row_count:
                         container_id = table.get_cell_at((row, 0))
-                        logger.info(f"Cursor moved to container: {container_id}")
                         # Select the container to update the status bar
                         self.select_container(container_id)
                 except Exception as e:
@@ -1609,7 +1633,6 @@ class ContainerList(VerticalScroll):
                     if row is not None and row < table.row_count:
                         container_id = table.get_cell_at((row, 0))
                         self.select_container(container_id)
-                        logger.info(f"Container selected via cell: {container_id}")
                 except Exception as e:
                     logger.error(f"Error handling table selection: {str(e)}", exc_info=True)
                 break
@@ -1628,7 +1651,6 @@ class ContainerList(VerticalScroll):
                     if row is not None and row < table.row_count:
                         container_id = table.get_cell_at((row, 0))
                         # We don't select the container here, just log for debugging
-                        logger.info(f"Container highlighted: {container_id}")
                 except Exception as e:
                     logger.error(f"Error handling row highlight: {str(e)}", exc_info=True)
                 break
@@ -1646,7 +1668,6 @@ class ContainerList(VerticalScroll):
                     row, _ = coordinate
                     if row is not None and row < table.row_count:
                         container_id = table.get_cell_at((row, 0))
-                        logger.info(f"Cell highlighted for container: {container_id}")
                 except Exception as e:
                     logger.error(f"Error handling cell highlight: {str(e)}", exc_info=True)
                 break
@@ -1655,8 +1676,6 @@ class ContainerList(VerticalScroll):
         """Handle DataTable click events."""
         table = event.sender
 
-        logger.info(f"DataTable click event received: {event}")
-        logger.info(f"Event attributes: {dir(event)}")
 
         # Find which stack this table belongs to
         for stack_name, stack_table in self.stack_tables.items():
@@ -1665,29 +1684,32 @@ class ContainerList(VerticalScroll):
                     # Get the click coordinates
                     if hasattr(event, 'coordinate'):
                         row, _ = event.coordinate
-                        logger.info(f"Click coordinate: {event.coordinate}")
                     elif hasattr(event, 'y'):
                         # Convert screen y to row index
                         y = event.y - table.screen_y
                         row = y // 1  # Assuming row height is 1
-                        logger.info(f"Click y position: {y}, calculated row: {row}")
                     else:
                         # Fall back to current cursor position
                         row = table.cursor_row
-                        logger.info(f"Using current cursor row: {row}")
 
-                    logger.info(f"Click detected at row: {row}")
 
                     if row is not None and row < table.row_count:
-                        # Focus the table
-                        table.focus()
+                        # Check if the search input is currently focused
+                        # If it is, don't steal focus from it
+                        if self.screen and self.screen.focused:
+                            focused_widget = self.screen.focused
+                            if not (hasattr(focused_widget, 'id') and focused_widget.id == "search-input"):
+                                # Focus the table only if search input is not focused
+                                table.focus()
+                        else:
+                            # Focus the table
+                            table.focus()
 
                         # Move the cursor to the clicked row
                         table.move_cursor(row=row)
 
                         # Get the container ID from the first column
                         container_id = table.get_cell_at((row, 0))
-                        logger.info(f"Table clicked for container: {container_id}")
 
                         # Select the container to update the status bar
                         self.select_container(container_id)
@@ -1699,7 +1721,6 @@ class ContainerList(VerticalScroll):
         """Handle DataTable selection events."""
         table = event.sender
 
-        logger.info(f"DataTable.Selected event received: {event}")
 
         # Find which stack this table belongs to
         for stack_name, stack_table in self.stack_tables.items():
@@ -1710,7 +1731,6 @@ class ContainerList(VerticalScroll):
                     if row is not None and row < table.row_count:
                         # Get the container ID from the first column
                         container_id = table.get_cell_at((row, 0))
-                        logger.info(f"Container selected via DataTable.Selected: {container_id}")
 
                         # Select the container to update the status bar
                         self.select_container(container_id)
@@ -1722,8 +1742,6 @@ class ContainerList(VerticalScroll):
         """Handle mouse down events on the DataTable."""
         table = event.sender
 
-        logger.info(f"DataTable mouse down event received: {event}")
-        logger.info(f"Mouse event attributes: {dir(event)}")
 
         # Find which stack this table belongs to
         for stack_name, stack_table in self.stack_tables.items():
@@ -1738,18 +1756,24 @@ class ContainerList(VerticalScroll):
                     header_height = 1  # Adjust based on your header height
                     row = (mouse_y - header_height) // 1  # Assuming row height is 1
 
-                    logger.info(f"Mouse down at position: ({mouse_x}, {mouse_y}), calculated row: {row}")
 
                     if row >= 0 and row < table.row_count:
-                        # Focus the table
-                        table.focus()
+                        # Check if the search input is currently focused
+                        # If it is, don't steal focus from it
+                        if self.screen and self.screen.focused:
+                            focused_widget = self.screen.focused
+                            if not (hasattr(focused_widget, 'id') and focused_widget.id == "search-input"):
+                                # Focus the table only if search input is not focused
+                                table.focus()
+                        else:
+                            # Focus the table
+                            table.focus()
 
                         # Move the cursor to the clicked row
                         table.move_cursor(row=row)
 
                         # Get the container ID from the first column
                         container_id = table.get_cell_at((row, 0))
-                        logger.info(f"Mouse down on container: {container_id}")
 
                         # Select the container to update the status bar
                         self.select_container(container_id)
