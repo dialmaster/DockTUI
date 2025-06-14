@@ -157,3 +157,8 @@ The `./start.sh` script supports the following options:
 ./start.sh --debug   # Same as -d
 ./start.sh -h        # Show help
 ./start.sh --help    # Show help
+
+### Screenshots
+![dockerview_shot1](https://github.com/user-attachments/assets/2aa27bdf-345f-43dd-9b03-28843ffb72a2)
+![dockerview_shot2](https://github.com/user-attachments/assets/87a61238-33d5-4f2a-9c17-58f3b34c5815)
+
