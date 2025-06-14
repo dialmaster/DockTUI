@@ -4,7 +4,9 @@ import queue
 import subprocess
 import os
 import platform
-from textual.widgets import Static, RichLog, Checkbox, Input, TextArea
+from collections import deque
+import docker
+from textual.widgets import Static, RichLog, Checkbox, Input, TextArea, Select, Label
 from textual.containers import Vertical, Horizontal, Container
 from textual.widget import Widget
 from textual.binding import Binding
@@ -12,6 +14,7 @@ from textual.message import Message
 from textual.events import MouseUp, MouseDown
 from rich.text import Text
 from rich.style import Style
+from ..config import config
 
 logger = logging.getLogger('dockerview.log_pane')
 
@@ -160,6 +163,21 @@ class LogPane(Vertical):
         dock: top;
     }
 
+    .log-controls-label {
+        margin-top: 1;
+        margin-left: 2;
+    }
+
+    .log-controls-search {
+        height: 4;
+        max-height: 4 !important;
+        padding: 0 1;
+        background: $surface;
+        margin-top: 6;
+        dock: top;
+    }
+
+
     /* Container for the middle content, this contains the log display and the no selection display */
     .log-content-container {
         min-height: 1fr;  /* Fill remaining space */
@@ -200,8 +218,20 @@ class LogPane(Vertical):
         background: $primary-lighten-1;
     }
 
+    #tail-select {
+        width: 40%;
+        height: 3;
+        margin: 0 1 0 0;
+    }
+
+    #since-select {
+        width: 40%;
+        height: 3;
+        margin: 0 1 0 0;
+    }
+
     #search-input {
-        width: 60%;
+        width: 70%;
         height: 3;
         margin: 0 1 0 0;
     }
@@ -223,8 +253,26 @@ class LogPane(Vertical):
         self.current_item_data = None
         self.search_filter = ""
         self.auto_follow = True
-        self.all_log_lines = []  # Store all log lines for filtering
+
+        # Performance optimization: Use deque with maxlen to cap memory usage
+        self.MAX_LINES = config.get('log.max_lines', 2000)
+        self.all_log_lines = deque(maxlen=self.MAX_LINES)  # Store all log lines for filtering
         self.filtered_line_count = 0  # Track number of lines matching filter
+
+        # Log tail and since configuration
+        self.LOG_TAIL = str(config.get('log.tail', 200))
+        self.LOG_SINCE = config.get('log.since', '15m')
+
+        # Track if we've received any logs yet
+        self.initial_log_check_done = False
+        self.waiting_for_logs = False
+
+        # Docker client for SDK streaming
+        try:
+            self.docker_client = docker.from_env()
+        except Exception as e:
+            logger.warning(f"Failed to initialize Docker client, falling back to CLI: {e}")
+            self.docker_client = None
 
         # Threading for log streaming
         self.log_thread = None
@@ -239,6 +287,8 @@ class LogPane(Vertical):
         self.search_input = None
         self.auto_follow_checkbox = None
         self.content_container = None
+        self.tail_select = None
+        self.since_select = None
 
         # Timer for processing log queue
         self.queue_timer = None
@@ -252,6 +302,55 @@ class LogPane(Vertical):
         self.search_input = Input(placeholder="Filter logs...", id="search-input")
         self.auto_follow_checkbox = Checkbox("Auto-follow", self.auto_follow, id="auto-follow-checkbox")
 
+        # Create dropdown options for log settings
+        tail_options = [
+            ("50 lines", "50"),
+            ("100 lines", "100"),
+            ("200 lines", "200"),
+            ("400 lines", "400"),
+            ("800 lines", "800"),
+            ("1600 lines", "1600"),
+            ("3200 lines", "3200"),
+            ("6400 lines", "6400"),
+            ("12800 lines", "12800"),
+        ]
+
+        since_options = [
+            ("5 minutes", "5m"),
+            ("10 minutes", "10m"),
+            ("15 minutes", "15m"),
+            ("30 minutes", "30m"),
+            ("1 hour", "1h"),
+            ("2 hours", "2h"),
+            ("4 hours", "4h"),
+            ("8 hours", "8h"),
+            ("24 hours", "24h"),
+            ("48 hours", "48h"),
+        ]
+
+        # Create dropdowns with current values selected
+        # If current value is not in options, add it
+        if not any(opt[1] == self.LOG_TAIL for opt in tail_options):
+            tail_options.insert(0, (f"{self.LOG_TAIL} lines", self.LOG_TAIL))
+
+        self.tail_select = Select(
+            options=tail_options,
+            value=self.LOG_TAIL,
+            id="tail-select",
+            classes="log-setting"
+        )
+
+        # If current value is not in options, add it
+        if not any(opt[1] == self.LOG_SINCE for opt in since_options):
+            since_options.insert(0, (f"{self.LOG_SINCE}", self.LOG_SINCE))
+
+        self.since_select = Select(
+            options=since_options,
+            value=self.LOG_SINCE,
+            id="since-select",
+            classes="log-setting"
+        )
+
         # Create the no-selection display
         self.no_selection_display = Static(
             Text.assemble(
@@ -259,7 +358,8 @@ class LogPane(Vertical):
                 "• Click on a container to see its logs\n",
                 "• Click on a stack header to see logs for all containers in the stack\n",
                 "• Use the search box to filter log entries\n",
-                "• Toggle auto-follow to stop/start automatic scrolling\n\n",
+                "• Toggle auto-follow to stop/start automatic scrolling\n",
+                "• Adjust log settings to change time range and line count\n\n",
                 ("Text Selection:\n", "bold"),
                 "• Click and drag with mouse to select text\n",
                 "• Right-click on selected text to copy",
@@ -277,13 +377,23 @@ class LogPane(Vertical):
         self.log_display.display = False
         # TextArea is focusable by default
 
-        # Yield widgets in order: header, content, controls
+        # Yield widgets in order: header, controls, content
         yield self.header
 
+        # First control row - log settings
+        yield Horizontal(
+            Label("Show last:", classes="log-controls-label"),
+            self.tail_select,
+            Label("From past:", classes="log-controls-label"),
+            self.since_select,
+            classes="log-controls"
+        )
+
+        # Second control row - search and auto-follow
         yield Horizontal(
             self.search_input,
             self.auto_follow_checkbox,
-            classes="log-controls",
+            classes="log-controls-search"
         )
 
         # Content container that will expand to fill space
@@ -321,16 +431,16 @@ class LogPane(Vertical):
             if item_type == "container" and self.current_item_data:
                 old_status = self.current_item_data.get('status', '').lower()
                 new_status = item_data.get('status', '').lower()
-                
+
                 # Check if container stopped
-                if (('running' in old_status or 'up' in old_status) and 
+                if (('running' in old_status or 'up' in old_status) and
                     ('exited' in new_status or 'stopped' in new_status)):
                     # Container was stopped, update the display
                     self._handle_status_change(item_data)
                     return
-                    
+
                 # Check if container started
-                elif (('exited' in old_status or 'stopped' in old_status) and 
+                elif (('exited' in old_status or 'stopped' in old_status) and
                       ('running' in new_status or 'up' in new_status)):
                     # Container was started, resume logs
                     self._handle_status_change(item_data)
@@ -367,7 +477,7 @@ class LogPane(Vertical):
 
         # Clear previous logs and stored lines
         self.log_display.clear()
-        self.all_log_lines = []
+        self.all_log_lines.clear()  # Clear the deque
         self.filtered_line_count = 0
 
         # Check if this is a container and if it's not running
@@ -404,30 +514,30 @@ class LogPane(Vertical):
 
         # Clear logs and stored lines
         self.log_display.clear()
-        self.all_log_lines = []
+        self.all_log_lines.clear()  # Clear the deque
 
         # Refresh to ensure visibility changes take effect
         self.refresh()
 
     def _handle_status_change(self, item_data: dict):
         """Handle container status changes (started/stopped).
-        
+
         Args:
             item_data: Updated container data with new status
         """
         # Stop any existing log streaming
         self._stop_logs()
-        
+
         # Update stored data
         self.current_item_data = item_data
-        
+
         # Clear previous logs
         self.log_display.clear()
-        self.all_log_lines = []
+        self.all_log_lines.clear()  # Clear the deque
         self.filtered_line_count = 0
-        
+
         status = item_data.get('status', '').lower()
-        
+
         if 'exited' in status or 'stopped' in status or 'created' in status:
             # Container is not running, show message
             self.log_display.text = f"Container '{item_data.get('name', self.current_item[1])}' is not running.\nStatus: {item_data['status']}"
@@ -446,9 +556,9 @@ class LogPane(Vertical):
 
         item_type, item_id = self.current_item
 
-        # Build Docker command
+        # Build Docker command with performance optimizations
         if item_type == "container":
-            docker_cmd = ["docker", "logs", "-f", "--tail", "400", item_id]
+            docker_cmd = ["docker", "logs", "-f", f"--tail={self.LOG_TAIL}", f"--since={self.LOG_SINCE}", item_id]
         elif item_type == "stack":
             # Try to use compose file if available
             config_file = self.current_item_data.get("config_file", "")
@@ -464,22 +574,24 @@ class LogPane(Vertical):
                 if config_dir:
                     # Store the working directory for the subprocess
                     self.working_directory = config_dir
-                    docker_cmd = ["docker", "compose", "-f", config_file, "logs", "-f", "--tail=400"]
+                    docker_cmd = ["docker", "compose", "-f", config_file, "logs", "--no-color", "--no-log-prefix", f"--tail={self.LOG_TAIL}", f"--since={self.LOG_SINCE}", "-f"]
                 else:
                     # Config file is in current directory
                     self.working_directory = None
-                    docker_cmd = ["docker", "compose", "-f", config_file, "logs", "-f", "--tail=400"]
+                    docker_cmd = ["docker", "compose", "-f", config_file, "logs", "--no-color", "--no-log-prefix", f"--tail={self.LOG_TAIL}", f"--since={self.LOG_SINCE}", "-f"]
             else:
                 # Fallback to using project name
                 self.working_directory = None
-                docker_cmd = ["docker", "compose", "-p", stack_name, "logs", "-f", "--tail=400"]
+                docker_cmd = ["docker", "compose", "-p", stack_name, "logs", "--no-color", "--no-log-prefix", f"--tail={self.LOG_TAIL}", f"--since={self.LOG_SINCE}", "-f"]
         else:
             logger.error(f"Unknown item type: {item_type}")
             return
 
 
-        # Add a test message to the log display to verify it's working
-        self.log_display.text = f"Starting logs for {item_type}: {item_id}...\n"
+        # Add a loading message
+        self.log_display.text = f"Loading logs for {item_type}: {item_id}...\n"
+        self.waiting_for_logs = True
+        self.initial_log_check_done = False
 
         # Start the log worker thread
         self.stop_event.clear()
@@ -521,6 +633,18 @@ class LogPane(Vertical):
 
     def _log_worker(self, docker_cmd):
         """Worker thread that reads Docker logs and puts them in the queue."""
+        # Check if we should use Docker SDK streaming for containers
+        item_type, item_id = self.current_item if self.current_item else (None, None)
+
+        # Use Docker SDK for containers if available
+        if item_type == "container" and self.docker_client:
+            try:
+                self._log_worker_sdk(item_id)
+                return
+            except Exception as e:
+                logger.warning(f"Docker SDK streaming failed, falling back to CLI: {e}")
+
+        # Fall back to CLI approach
         try:
             # Prepare subprocess kwargs
             popen_kwargs = {
@@ -543,6 +667,12 @@ class LogPane(Vertical):
             self.process = subprocess.Popen(docker_cmd, **popen_kwargs)
             # Read lines from the process
             line_count = 0
+            has_any_logs = False
+
+            # Set a timer to check if we've received any logs
+            check_timer = threading.Timer(2.0, lambda: self._check_no_logs_found() if not has_any_logs else None)
+            check_timer.start()
+
             for line in self.process.stdout:
                 if self.stop_event.is_set():
                     break
@@ -550,9 +680,13 @@ class LogPane(Vertical):
                 # Strip the line and add to queue
                 line = line.rstrip()
                 if line:
+                    has_any_logs = True
                     line_count += 1
                     self.log_queue.put(("log", line))
                     # Log first few lines for debugging handled elsewhere
+
+            # Cancel timer if still running
+            check_timer.cancel()
 
         except Exception as e:
             logger.error(f"Error in log worker: {e}", exc_info=True)
@@ -561,6 +695,47 @@ class LogPane(Vertical):
             if self.process:
                 self.process.stdout.close()
                 self.process.wait()
+
+    def _log_worker_sdk(self, container_id):
+        """Worker thread that uses Docker SDK to stream container logs."""
+        try:
+            container = self.docker_client.containers.get(container_id)
+
+            # Convert tail and since parameters
+            tail = int(self.LOG_TAIL)
+            since = self.LOG_SINCE
+
+            # Stream logs using Docker SDK
+            log_stream = container.logs(
+                stream=True,
+                follow=True,
+                tail=tail,
+                since=since,
+                stdout=True,
+                stderr=True,
+                timestamps=False
+            )
+
+            line_count = 0
+            for line in log_stream:
+                if self.stop_event.is_set():
+                    break
+
+                # Decode and strip the line
+                if isinstance(line, bytes):
+                    line = line.decode('utf-8', errors='replace')
+                line = line.rstrip()
+
+                if line:
+                    line_count += 1
+                    self.log_queue.put(("log", line))
+
+        except docker.errors.NotFound:
+            self.log_queue.put(("error", f"Container {container_id} not found"))
+        except Exception as e:
+            logger.error(f"Error in SDK log worker: {e}", exc_info=True)
+            # Fall back to CLI by re-raising the exception
+            raise
 
     def _process_log_queue(self):
         """Timer callback to process queued log lines."""
@@ -611,11 +786,26 @@ class LogPane(Vertical):
                         else:
                             self.log_display.text = current_text + error_msg + '\n'
                         logger.error(f"Queue error message: {content}")
+                    elif msg_type == "no_logs":
+                        # Show informative message when no logs are found
+                        if self.waiting_for_logs:
+                            self.log_display.clear()
+                            self.waiting_for_logs = False
+                            item_type, item_id = self.current_item if self.current_item else ("", "")
+
+                            self.log_display.text = f"No logs found for {item_type}: {item_id}\n\n"
+                            self.log_display.text += "This could mean:\n"
+                            self.log_display.text += "  • The container/stack hasn't produced logs in the selected time range\n"
+                            self.log_display.text += "  • The container/stack was recently started\n"
+                            self.log_display.text += "  • Logs may have been cleared or rotated\n\n"
+                            self.log_display.text += "Try adjusting the log settings above to see more history.\n\n"
+                            self.log_display.text += "Waiting for new logs..."
 
                 except queue.Empty:
                     break
 
             if processed > 0:
+                self.initial_log_check_done = True
 
                 # If we have a filter, have processed some logs, but no lines matched, show message
                 if self.search_filter and len(self.all_log_lines) > 0 and self.filtered_line_count == 0:
@@ -623,6 +813,12 @@ class LogPane(Vertical):
 
         except Exception as e:
             logger.error(f"Error processing log queue: {e}", exc_info=True)
+
+    def _check_no_logs_found(self):
+        """Check if no logs were found and show an informative message."""
+        if self.waiting_for_logs and not self.initial_log_check_done:
+            # No logs received yet
+            self.log_queue.put(("no_logs", ""))
 
     def _refilter_logs(self):
         """Re-filter and display all stored log lines based on current search filter."""
@@ -670,6 +866,45 @@ class LogPane(Vertical):
                 self.log_display.move_cursor(self.log_display.document.end)
                 # Ensure cursor is visible (this scrolls to it)
                 self.log_display.scroll_cursor_visible()
+
+    def on_select_changed(self, event):
+        """Handle dropdown selection changes."""
+        if event.select.id == "tail-select":
+            # Update tail setting
+            self.LOG_TAIL = event.value
+            logger.info(f"Log tail setting changed to: {self.LOG_TAIL}")
+
+            # If logs are currently displayed, restart them with new settings
+            if self.current_item and self.log_display.display:
+                self._restart_logs()
+
+        elif event.select.id == "since-select":
+            # Update since setting
+            self.LOG_SINCE = event.value
+            logger.info(f"Log since setting changed to: {self.LOG_SINCE}")
+
+            # If logs are currently displayed, restart them with new settings
+            if self.current_item and self.log_display.display:
+                self._restart_logs()
+
+    def _restart_logs(self):
+        """Restart log streaming with new settings."""
+        # Stop current logs
+        self._stop_logs()
+
+        # Clear display and show loading message
+        self.log_display.clear()
+        self.all_log_lines.clear()
+        self.filtered_line_count = 0
+
+        # Show loading message
+        item_type, item_id = self.current_item
+        self.log_display.text = f"Reloading logs for {item_type}: {item_id}...\n"
+        self.waiting_for_logs = True
+        self.initial_log_check_done = False
+
+        # Start logs again
+        self._start_logs()
 
     def action_copy_selection(self):
         """Copy the selected text to the clipboard."""
