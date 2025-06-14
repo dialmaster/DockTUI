@@ -7,6 +7,65 @@ This is designed to replicate, somewhat, the main UI view from Docker Desktop.
 
 dockerview is a modern terminal user interface (TUI) for real-time monitoring and management of Docker containers and Docker Compose stacks. It provides an intuitive, keyboard-driven interface for viewing container status, resource usage, logs, and container management.
 
+## Screenshots
+
+![dockerview_shot1](https://github.com/user-attachments/assets/2aa27bdf-345f-43dd-9b03-28843ffb72a2)
+![dockerview_shot2](https://github.com/user-attachments/assets/87a61238-33d5-4f2a-9c17-58f3b34c5815)
+
+## Quick Start
+
+### Prerequisites
+
+- Python 3.8 or higher
+- Docker Engine installed and running
+- Docker Compose
+- Unix-like terminal (Linux, macOS, or WSL2 on Windows)
+
+**Important:** dockerview must be run on the same filesystem where your Docker Compose files are located. It cannot currently monitor remote Docker instances.
+
+### Installation and Usage
+
+```bash
+# Clone the repository
+git clone https://github.com/dialmaster/dockerview.git
+cd dockerview
+
+# Run dockerview (automatically installs dependencies)
+./start.sh
+```
+
+That's it! The `start.sh` script will handle dependency installation via Poetry automatically.
+
+### Start Script Options
+
+```bash
+./start.sh           # Run normally
+./start.sh -d        # Run with debug logging enabled
+./start.sh --debug   # Same as -d
+./start.sh -h        # Show help
+./start.sh --help    # Show help
+```
+
+## Keyboard Shortcuts
+
+### Navigation
+- `↑/↓`: Navigate through containers and stacks
+- `←/→`: Collapse/expand stacks
+- `Tab`: Switch focus between panes
+- `q`: Quit the application
+
+### Container/Stack Management
+- `s`: Start selected container or stack
+- `t`: Stop selected container or stack
+- `e`: Restart selected container or stack
+- `u`: Recreate selected container or stack (docker compose up -d)
+
+### Log Viewer
+- Click and drag: Select text in log viewer
+- Right-click: Copy selected text to clipboard
+- Filter box: Type to filter log entries in real-time
+- Auto-follow checkbox: Toggle automatic scrolling of new log entries
+
 ## Features
 
 - Real-time monitoring of Docker containers and Docker Compose stacks
@@ -22,6 +81,54 @@ dockerview is a modern terminal user interface (TUI) for real-time monitoring an
 - Low system resource footprint
 - Cross-platform support (Linux, macOS, Windows)
 - Debug mode with detailed logging
+
+## Manual Installation
+
+If you prefer to install manually or the start script doesn't work:
+
+```bash
+# Install Poetry if not already installed
+pip install poetry
+
+# Install dependencies and create virtual environment
+poetry install
+
+# Activate the virtual environment
+poetry shell
+
+# Run dockerview
+python -m dockerview
+```
+
+### Debug Mode
+
+To enable debug mode with detailed logging:
+
+```bash
+# Using the start script (recommended)
+./start.sh -d
+
+# Or manually
+export DOCKERVIEW_DEBUG=1
+python -m dockerview
+```
+
+### WSL2 Clipboard Support
+
+If you're running dockerview in WSL2 and want to use the clipboard functionality (right-click copy in log pane), you may need to install `xclip`:
+
+```bash
+sudo apt-get install xclip
+```
+
+This is optional - dockerview will attempt to use PowerShell's clipboard integration first, but xclip provides a fallback.
+
+## Limitations and Known Issues
+
+- **Local Filesystem Only**: dockerview must be run on the same filesystem where your Docker Compose files are located. Remote Docker daemon monitoring is not currently supported.
+- **Docker Compose v2**: Requires Docker Compose v2 (the `docker compose` command, not the older `docker-compose`).
+- **Terminal Requirements**: Best experience in modern terminal emulators with full mouse and color support.
+- **Large Deployments**: Performance may degrade with hundreds of containers; optimizations are ongoing.
 
 ## Technical Design
 
@@ -65,101 +172,6 @@ Docker Engine <-> Docker SDK <-> DockerManager <-> UI Components
 - **LogPane**: Split-pane view for real-time container/stack log streaming with filtering
 - **StateManager**: Dedicated state management component
 
-## Usage
-
-### Keyboard Shortcuts
-
-#### Navigation
-- `↑/↓`: Navigate through containers and stacks
-- `←/→`: Collapse/expand stacks
-- `Tab`: Switch focus between panes
-- `q`: Quit the application
-
-#### Container/Stack Management
-- `s`: Start selected container or stack
-- `t`: Stop selected container or stack
-- `e`: Restart selected container or stack
-- `u`: Recreate selected container or stack (docker compose up -d)
-
-#### Log Viewer
-- Click and drag: Select text in log viewer
-- Right-click: Copy selected text to clipboard
-- Filter box: Type to filter log entries in real-time
-- Auto-follow checkbox: Toggle automatic scrolling of new log entries
-
 ## Development
 
-### Requirements
-
-- Python 3.8+
-- Docker Engine
-- Docker Compose
-- Textual library
-
-#### WSL2 Clipboard Support
-
-If you're running dockerview in WSL2 and want to use the clipboard functionality (right-click copy in log pane), you may need to install `xclip`:
-
-```bash
-sudo apt-get install xclip
-```
-
-This is optional - dockerview will attempt to use PowerShell's clipboard integration first, but xclip provides a fallback.
-
-### Setup
-
-```bash
-# Clone the repository
-git clone https://github.com/yourusername/dockerview.git
-cd dockerview
-
-# Install Poetry if not already installed
-# On Linux/macOS
-pip install poetry
-
-# Run dockerview (automatically installs dependencies)
-./start.sh
-```
-
-### Alternative Setup (Manual)
-
-```bash
-# Install dependencies and create virtual environment
-poetry install
-
-# Activate the virtual environment
-poetry shell
-
-# Run dockerview
-python -m dockerview
-```
-
-### Debug Mode
-
-To enable debug mode with detailed logging:
-
-```bash
-# Using the start script (recommended)
-./start.sh -d
-
-# Or manually
-export DOCKERVIEW_DEBUG=1
-python -m dockerview
-```
-
-### Start Script Options
-
-The `./start.sh` script supports the following options:
-
-```bash
-./start.sh           # Run normally
-./start.sh -d        # Run with debug logging enabled
-./start.sh --debug   # Same as -d
-./start.sh -h        # Show help
-./start.sh --help    # Show help
-```
-
-### Screenshots
-![dockerview_shot1](https://github.com/user-attachments/assets/2aa27bdf-345f-43dd-9b03-28843ffb72a2)
-![dockerview_shot2](https://github.com/user-attachments/assets/87a61238-33d5-4f2a-9c17-58f3b34c5815)
-
+For contributing to dockerview, see the technical details above.
