@@ -2,7 +2,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 from textual import work
 from textual.app import App, ComposeResult
-from textual.containers import Container, Vertical
+from textual.containers import Vertical, Horizontal
 from textual.widgets import Header, Footer, Static
 from textual.binding import Binding
 from rich.console import RenderableType
@@ -10,12 +10,11 @@ from textual.timer import Timer
 from textual.worker import Worker, get_current_worker
 import asyncio
 from typing import Tuple, Dict, List
-import sys
 import os
-import time
 from pathlib import Path
 
-from dockerview.ui.containers import ContainerList
+from dockerview.ui.containers import ContainerList, SelectionChanged
+from dockerview.ui.log_pane import LogPane
 from dockerview.docker_mgmt.manager import DockerManager
 
 def setup_logging():
@@ -44,7 +43,7 @@ def setup_logging():
 
     # Use RotatingFileHandler to limit log file size to 20MB with 2 backup files
     file_handler = RotatingFileHandler(
-        log_file, 
+        log_file,
         maxBytes=20 * 1024 * 1024,  # 20MB
         backupCount=2
     )
@@ -63,8 +62,6 @@ logger = logging.getLogger('dockerview')
 if log_file:  # Only log if debug mode is enabled
     logger.info(f"Logging initialized. Log file: {log_file}")
 
-# Flag to track if we've completed one refresh cycle in debug mode
-DEBUG_REFRESH_COMPLETED = False
 
 class ErrorDisplay(Static):
     """A widget that displays error messages with error styling.
@@ -91,26 +88,6 @@ class ErrorDisplay(Static):
         super().update(renderable)
         self.styles.display = "block" if renderable else "none"
 
-class Instructions(Static):
-    """A widget that displays usage instructions."""
-
-    DEFAULT_CSS = """
-    Instructions {
-        background: $surface-darken-2;
-        color: $text-muted;
-        padding: 0 1 1 1;
-        height: auto;
-        text-align: left;
-    }
-    """
-
-    def __init__(self):
-        instructions = (
-            "• To follow logs for a docker compose stack:   docker compose -f <STACK_CONFIG_FILE> logs -f\n"
-            "• To follow logs for a container:              docker logs -f <CONTAINER_ID>\n"
-        )
-        super().__init__(instructions)
-
 class StatusBar(Static):
     """A widget that displays the current selection status at the bottom of the screen."""
 
@@ -120,7 +97,8 @@ class StatusBar(Static):
         color: $text-primary;
         height: 3;
         dock: bottom;
-        padding: 0 1;
+        padding-top: 0;
+        margin-top: 0;
         text-align: center;
         text-style: bold;
     }
@@ -154,10 +132,28 @@ class DockerViewApp(App):
         height: auto;
     }
 
-    Vertical {
+    Horizontal {
+        height: 100%;
+        width: 100%;
+        overflow: hidden;
+    }
+
+    #left-pane {
+        width: 50%;
+        height: 100%;
+        padding: 0 1;
+    }
+
+    /* Only apply to Vertical containers inside left-pane */
+    #left-pane Vertical {
         height: auto;
         width: 100%;
         padding: 0 1;
+    }
+
+    /* Ensure ContainerList fills available space and scrolls independently */
+    ContainerList {
+        height: 100%;
     }
 
     DataTable {
@@ -206,6 +202,7 @@ class DockerViewApp(App):
         Binding("s", "start", "Start Selected"),
         Binding("t", "stop", "Stop Selected"),
         Binding("e", "restart", "Restart Selected"),
+        Binding("u", "recreate", "Recreate Selected (Up)"),
     ]
 
     def __init__(self):
@@ -214,12 +211,16 @@ class DockerViewApp(App):
             super().__init__(driver_class=None)
             self.docker = DockerManager()
             self.container_list: ContainerList | None = None
+            self.log_pane: LogPane | None = None
             self.error_display: ErrorDisplay | None = None
             self.refresh_timer: Timer | None = None
             self._current_worker: Worker | None = None
             self._refresh_count = 0
             self.footer: Footer | None = None
             self.status_bar: StatusBar | None = None
+            # Track recreate operations to update log pane after refresh
+            self._recreating_container_name = None
+            self._recreating_item_type = None
         except Exception as e:
             logger.error(f"Error during initialization: {str(e)}", exc_info=True)
             raise
@@ -232,15 +233,16 @@ class DockerViewApp(App):
         """
         try:
             yield Header()
-            yield Instructions()
-            with Container():
-                with Vertical():
+            with Horizontal():
+                with Vertical(id="left-pane"):
                     error = ErrorDisplay()
                     error.id = "error"
                     yield error
                     container_list = ContainerList()
                     container_list.id = "containers"
                     yield container_list
+                log_pane = LogPane()
+                yield log_pane
             status_bar = StatusBar()
             status_bar.id = "status_bar"
             yield status_bar
@@ -260,6 +262,7 @@ class DockerViewApp(App):
             self.title = "Docker Container Monitor"
             # Get references to our widgets after they're mounted using IDs
             self.container_list = self.query_one("#containers", ContainerList)
+            self.log_pane = self.query_one("#log-pane", LogPane)
             self.error_display = self.query_one("#error", ErrorDisplay)
             self.footer = self.query_one("#footer", Footer)
             self.status_bar = self.query_one("#status_bar", StatusBar)
@@ -280,7 +283,6 @@ class DockerViewApp(App):
 
     def action_refresh(self) -> None:
         """Trigger an asynchronous refresh of the container list."""
-        logger.info("=== REFRESH ACTION TRIGGERED ===")
         try:
             # Use call_after_refresh to ensure we're in the right context
             self.call_after_refresh(self.refresh_containers)
@@ -299,11 +301,15 @@ class DockerViewApp(App):
         """Restart the selected container or stack."""
         self._execute_docker_command("restart")
 
+    def action_recreate(self) -> None:
+        """Recreate the selected container or stack using docker compose up -d."""
+        self._execute_docker_command("recreate")
+
     def _execute_docker_command(self, command: str) -> None:
         """Execute a Docker command on the selected item.
 
         Args:
-            command: The command to execute (start, stop, restart)
+            command: The command to execute (start, stop, restart, recreate)
         """
         if not self.container_list or not self.container_list.selected_item:
             self.error_display.update(f"No item selected to {command}")
@@ -311,20 +317,34 @@ class DockerViewApp(App):
 
         item_type, item_id = self.container_list.selected_item
         success = False
+        
+        # Track recreate operations so we can update log pane after refresh
+        if command == "recreate":
+            self._recreating_item_type = item_type
+            if item_type == "container" and self.container_list.selected_container_data:
+                self._recreating_container_name = self.container_list.selected_container_data.get("name")
+            elif item_type == "stack" and self.container_list.selected_stack_data:
+                self._recreating_container_name = self.container_list.selected_stack_data.get("name")
+        else:
+            self._recreating_container_name = None
+            self._recreating_item_type = None
+        
 
         try:
             if item_type == "container":
                 # Execute command on container
                 success = self.docker.execute_container_command(item_id, command)
                 item_name = self.container_list.selected_container_data.get("name", item_id) if self.container_list.selected_container_data else item_id
-                message = f"{command.capitalize()}ing container: {item_name}"
+                action_verb = "Recreating" if command == "recreate" else f"{command.capitalize()}ing"
+                message = f"{action_verb} container: {item_name}"
             elif item_type == "stack":
                 # Execute command on stack
                 if self.container_list.selected_stack_data:
                     stack_name = self.container_list.selected_stack_data.get("name", item_id)
                     config_file = self.container_list.selected_stack_data.get("config_file", "")
                     success = self.docker.execute_stack_command(stack_name, config_file, command)
-                    message = f"{command.capitalize()}ing stack: {stack_name}"
+                    action_verb = "Recreating" if command == "recreate" else f"{command.capitalize()}ing"
+                    message = f"{action_verb} stack: {stack_name}"
                 else:
                     self.error_display.update(f"Missing stack data for {item_id}")
                     return
@@ -351,18 +371,14 @@ class DockerViewApp(App):
         Fetches updated container and stack information in a background thread,
         then updates the UI with the new data.
         """
-        global DEBUG_REFRESH_COMPLETED
-
-        refresh_start = time.time()
-        logger.info("[PERF] ====== REFRESH CYCLE STARTED ======")
-
         if not all([self.container_list, self.error_display]):
             logger.error("Error: Widgets not properly initialized")
             return
 
         try:
-            # Show loading indicator in the title
-            self.title = "Docker Container Monitor - Refreshing..."
+            # Add refreshing indicator to the existing title
+            if " - Refreshing..." not in self.title:
+                self.title = self.title + " - Refreshing..."
 
             # Start the worker but don't block waiting for it
             # Textual's worker pattern will call the function and then process the results
@@ -386,27 +402,11 @@ class DockerViewApp(App):
                 - Dict: Mapping of stack names to stack information
                 - List: List of container information dictionaries
         """
-        start_time = time.time()
-        logger.info("[PERF] Starting data fetch in thread")
         try:
             # Get networks, stacks and containers in the thread
-            networks_start = time.time()
             networks = self.docker.get_networks()
-            networks_end = time.time()
-            logger.info(f"[PERF] get_networks took {networks_end - networks_start:.3f}s")
-
-            stacks_start = time.time()
             stacks = self.docker.get_compose_stacks()
-            stacks_end = time.time()
-            logger.info(f"[PERF] get_compose_stacks took {stacks_end - stacks_start:.3f}s")
-
-            containers_start = time.time()
             containers = self.docker.get_containers()
-            containers_end = time.time()
-            logger.info(f"[PERF] get_containers took {containers_end - containers_start:.3f}s")
-
-            end_time = time.time()
-            logger.info(f"[PERF] Total worker time: {end_time - start_time:.3f}s - Found {len(networks)} networks, {len(stacks)} stacks and {len(containers)} containers")
 
             # Call the callback with the results
             # This will be executed in the main thread after the worker completes
@@ -448,10 +448,7 @@ class DockerViewApp(App):
             stacks: Dictionary of stack information
             containers: List of container information
         """
-        global DEBUG_REFRESH_COMPLETED
 
-        ui_update_start = time.time()
-        logger.info("[PERF] Starting UI update")
 
         try:
             # Begin a batch update to prevent UI flickering
@@ -459,21 +456,17 @@ class DockerViewApp(App):
 
             try:
                 # Process all networks first
-                networks_update_start = time.time()
                 for network_name, network_info in networks.items():
                     self.container_list.add_network(network_info)
-                    
+
                     # Add containers to the network
                     for container_info in network_info['connected_containers']:
                         self.container_list.add_container_to_network(
                             network_name,
                             container_info
                         )
-                networks_update_end = time.time()
-                logger.info(f"[PERF] Adding {len(networks)} networks took {networks_update_end - networks_update_start:.3f}s")
 
                 # Process all stacks next
-                stacks_update_start = time.time()
                 for stack_name, stack_info in stacks.items():
                     self.container_list.add_stack(
                         stack_name,
@@ -482,11 +475,8 @@ class DockerViewApp(App):
                         stack_info['exited'],
                         stack_info['total']
                     )
-                stacks_update_end = time.time()
-                logger.info(f"[PERF] Adding {len(stacks)} stacks took {stacks_update_end - stacks_update_start:.3f}s")
 
                 # Process all containers in a single batch
-                containers_update_start = time.time()
                 # Sort containers by stack to minimize UI updates
                 sorted_containers = sorted(containers, key=lambda c: c["stack"])
                 for container in sorted_containers:
@@ -494,19 +484,50 @@ class DockerViewApp(App):
                         container["stack"],
                         container
                     )
-                containers_update_end = time.time()
-                logger.info(f"[PERF] Adding {len(containers)} containers took {containers_update_end - containers_update_start:.3f}s")
 
             finally:
                 # Always end the update, even if cancelled
-                end_update_start = time.time()
-                logger.info("[PERF] Calling end_update()")
                 self.container_list.end_update()
-                end_update_end = time.time()
-                logger.info(f"[PERF] end_update() took {end_update_end - end_update_start:.3f}s")
 
-            ui_update_end = time.time()
-            logger.info(f"[PERF] Total UI update time: {ui_update_end - ui_update_start:.3f}s")
+            # Handle container recreation - update log pane if needed
+            if self._recreating_container_name and self.log_pane:
+                # Find the new container with the same name
+                new_container_id = None
+                new_container_data = None
+                
+                if self._recreating_item_type == "container":
+                    # Look for a container with the same name
+                    for container in containers:
+                        if container.get("name") == self._recreating_container_name:
+                            new_container_id = container.get("id")
+                            new_container_data = container
+                            break
+                    
+                    if new_container_id and new_container_data:
+                        # Use select_container to properly update the UI and trigger all necessary events
+                        self.container_list.select_container(new_container_id)
+                
+                elif self._recreating_item_type == "stack":
+                    # For stacks, just trigger a re-selection of the stack
+                    stack_name = self._recreating_container_name
+                    if stack_name in stacks:
+                        self.container_list.select_stack(stack_name)
+                
+                # Clear the tracking variables
+                self._recreating_container_name = None
+                self._recreating_item_type = None
+
+            # Check if selected container's status changed - update log pane if needed
+            if self.log_pane and self.container_list.selected_item:
+                item_type, item_id = self.container_list.selected_item
+                if item_type == "container":
+                    # Find the container in the new data
+                    for container in containers:
+                        if container.get("id") == item_id:
+                            # Always update the log pane with current status
+                            # The log pane will check if status actually changed
+                            self.log_pane.update_selection("container", item_id, container)
+                            break
 
             # Update title with summary
             total_running = sum(s['running'] for s in stacks.values())
@@ -514,11 +535,9 @@ class DockerViewApp(App):
             total_networks = len(networks)
             total_stacks = len(stacks)
 
-            # Update the app title with stats
+            # Update the app title with stats (removes any "- Refreshing..." suffix)
             self.title = f"Docker Monitor - {total_networks} Networks, {total_stacks} Stacks, {total_running} Running, {total_exited} Exited"
 
-            refresh_end = time.time()
-            logger.info(f"[PERF] ====== REFRESH CYCLE COMPLETED in {refresh_end - ui_update_start:.3f}s ======")
 
             # Increment refresh count
             self._refresh_count += 1
@@ -526,6 +545,23 @@ class DockerViewApp(App):
         except Exception as e:
             logger.error(f"Error during UI update: {str(e)}", exc_info=True)
             self.error_display.update(f"Error updating UI: {str(e)}")
+
+    def on_selection_changed(self, event: SelectionChanged) -> None:
+        """Handle selection changes from the container list.
+
+        Args:
+            event: The SelectionChanged event containing selection information
+        """
+        if not self.log_pane:
+            return
+
+
+        if event.item_type == "none":
+            # Clear selection
+            self.log_pane.clear_selection()
+        else:
+            # Update log pane with new selection
+            self.log_pane.update_selection(event.item_type, event.item_id, event.item_data)
 
 def main():
     """Run the Docker container monitoring application."""

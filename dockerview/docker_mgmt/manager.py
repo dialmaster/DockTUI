@@ -220,17 +220,44 @@ class DockerManager:
 
         Args:
             container_id: ID of the container to operate on
-            command: Command to execute (start, stop, restart)
+            command: Command to execute (start, stop, restart, recreate)
 
         Returns:
             bool: True if successful, False otherwise
         """
         try:
-            logger.info(f"Executing container command: docker {command} {container_id}")
+            if command == "recreate":
+                # For recreate, we need to get the service name and stack name
+                container = self.client.containers.get(container_id)
+                stack_name = container.labels.get('com.docker.compose.project')
+                service_name = container.labels.get('com.docker.compose.service')
+                
+                if not stack_name or not service_name:
+                    error_msg = "Cannot recreate container: missing compose project or service labels"
+                    logger.error(error_msg)
+                    self.last_error = error_msg
+                    return False
+                
+                # Get the compose config file(s)
+                config_files = container.labels.get('com.docker.compose.project.config_files', '')
+                
+                cmd = ['docker', 'compose', '-p', stack_name]
+                
+                # Add config file(s) if available
+                if config_files and config_files != 'N/A':
+                    # Config files are comma-separated
+                    for config_file in config_files.split(','):
+                        cmd.extend(['-f', config_file.strip()])
+                
+                cmd.extend(['up', '-d', service_name])
+                logger.info(f"Executing recreate command: {' '.join(cmd)}")
+            else:
+                logger.info(f"Executing container command: docker {command} {container_id}")
+                cmd = ['docker', command, container_id]
 
             # Use Popen to run the command in the background
             process = subprocess.Popen(
-                ['docker', command, container_id],
+                cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True
@@ -329,25 +356,26 @@ class DockerManager:
         Args:
             stack_name: Name of the stack to operate on
             config_file: Path to the compose configuration file
-            command: Command to execute (start, stop, restart)
+            command: Command to execute (start, stop, restart, recreate)
 
         Returns:
             bool: True if successful, False otherwise
         """
         try:
-            logger.info(f"Executing stack command: docker compose -p {stack_name} {command}")
-
-            cmd = ['docker', 'compose']
-
-            # Add project name
-            cmd.extend(['-p', stack_name])
-
-            # Add config file if provided and not 'N/A'
-            #if config_file and config_file != 'N/A':
-            #    cmd.extend(['-f', config_file])
-
-            # Add the command
-            cmd.append(command)
+            cmd = ['docker', 'compose', '-p', stack_name]
+            
+            # Add config file(s) if provided and not 'N/A'
+            if config_file and config_file != 'N/A':
+                # Config files are comma-separated
+                for cf in config_file.split(','):
+                    cmd.extend(['-f', cf.strip()])
+            
+            if command == "recreate":
+                cmd.extend(['up', '-d'])
+                logger.info(f"Executing stack recreate command: {' '.join(cmd)}")
+            else:
+                cmd.append(command)
+                logger.info(f"Executing stack command: {' '.join(cmd)}")
 
             # Use Popen to run the command in the background
             process = subprocess.Popen(
