@@ -227,6 +227,9 @@ class ContainerList(VerticalScroll):
             self.selected_item = None  # Will store either ("stack", stack_name) or ("container", container_id)
             self.selected_container_data = None  # Will store container data if a container is selected
             self.selected_stack_data = None  # Will store stack data if a stack is selected
+
+            # Track which stacks exist in current update cycle
+            self._stacks_in_new_data = set()
         except Exception as e:
             logger.error(f"Error during ContainerList initialization: {str(e)}", exc_info=True)
             raise
@@ -279,6 +282,9 @@ class ContainerList(VerticalScroll):
         # Clear the container_rows tracking dictionary to ensure we properly update all containers
         self.container_rows.clear()
 
+        # Track which stacks should exist after this update (reset each update cycle)
+        self._stacks_in_new_data = set()
+
         end_time = time.time()
         logger.info(f"[PERF] ContainerList.begin_update() completed in {end_time - start_time:.3f}s")
 
@@ -288,7 +294,60 @@ class ContainerList(VerticalScroll):
         start_time = time.time()
 
         try:
-            # First, determine what needs to be added, updated, or removed
+            # First, clean up stacks that no longer exist in the Docker data
+            cleanup_start = time.time()
+            stacks_to_remove = []
+            for stack_name in list(self.stack_headers.keys()):
+                if stack_name not in self._stacks_in_new_data:
+                    stacks_to_remove.append(stack_name)
+                    logger.info(f"Removing stack that no longer exists: {stack_name}")
+
+            # More efficient: collect all containers to remove in one pass
+            containers_to_remove = {}  # stack_name -> [container_ids]
+            for cid, (cstack, _) in self.container_rows.items():
+                if cstack in stacks_to_remove:
+                    if cstack not in containers_to_remove:
+                        containers_to_remove[cstack] = []
+                    containers_to_remove[cstack].append(cid)
+
+            # Remove obsolete stacks and their associated data
+            for stack_name in stacks_to_remove:
+                # Remove from expanded stacks tracking
+                self.expanded_stacks.discard(stack_name)
+
+                # Remove actual UI widgets - find and remove the stack container
+                for child in list(self.children):
+                    if isinstance(child, Container) and "stack-container" in child.classes:
+                        # Find the stack name by looking at the header
+                        for widget in child.children:
+                            if isinstance(widget, StackHeader) and widget.stack_name == stack_name:
+                                child.remove()
+                                break
+
+                # Remove from internal tracking dictionaries
+                if stack_name in self.stack_headers:
+                    del self.stack_headers[stack_name]
+                if stack_name in self.stack_tables:
+                    del self.stack_tables[stack_name]
+
+                # Remove container rows that belonged to this stack
+                if stack_name in containers_to_remove:
+                    for cid in containers_to_remove[stack_name]:
+                        del self.container_rows[cid]
+
+                # Clear selection if it was pointing to this stack or its containers
+                if self.selected_item and self.selected_item[0] == "stack" and self.selected_item[1] == stack_name:
+                    self.selected_item = None
+                    self.selected_stack_data = None
+                elif (self.selected_item and self.selected_item[0] == "container" and
+                      stack_name in containers_to_remove and self.selected_item[1] in containers_to_remove[stack_name]):
+                    self.selected_item = None
+                    self.selected_container_data = None
+
+            cleanup_end = time.time()
+            logger.info(f"[PERF] Stack cleanup took {cleanup_end - cleanup_start:.3f}s")
+
+            # Then, determine what needs to be added, updated, or removed
             prepare_start = time.time()
 
             # Track existing and new stack containers
@@ -472,6 +531,9 @@ class ContainerList(VerticalScroll):
             exited: Number of exited containers
             total: Total number of containers
         """
+        # Track that this stack exists in the new data
+        self._stacks_in_new_data.add(name)
+
         if name not in self.stack_tables:
             header = StackHeader(name, config_file, running, exited, total)
             table = self.create_stack_table(name)
