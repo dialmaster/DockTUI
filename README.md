@@ -302,7 +302,7 @@ poetry run pre-commit run --all-files
 
 GitHub Actions automatically runs on all pull requests and pushes to main:
 
-- Tests across Python 3.8, 3.9, 3.10, 3.11, and 3.12
+- Tests on Python 3.8 (minimum supported version)
 - Code formatting checks (black and isort)
 - Unit test execution
 
