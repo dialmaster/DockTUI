@@ -1,7 +1,7 @@
 """Main container list widget implementation."""
 
 import logging
-from typing import Dict, Optional
+from typing import Optional
 
 from rich.style import Style
 from rich.text import Text
@@ -10,6 +10,9 @@ from textual.widgets import DataTable
 
 from .container_list_base import ContainerListBase, SelectionChanged
 from .headers import NetworkHeader, StackHeader, VolumeHeader
+from .network_manager import NetworkManager
+from .stack_manager import StackManager
+from .volume_manager import VolumeManager
 
 logger = logging.getLogger("dockerview.containers")
 
@@ -20,6 +23,55 @@ class ContainerList(ContainerListBase):
     Provides collapsible stack sections with container details including resource usage
     and status information. Supports keyboard navigation and interaction.
     """
+
+    def __init__(self):
+        """Initialize the container list widget with resource managers."""
+        super().__init__()
+        # Initialize managers
+        self.volume_manager = VolumeManager(self)
+        self.network_manager = NetworkManager(self)
+        self.stack_manager = StackManager(self)
+
+        # Create references for backward compatibility
+        self._setup_backward_compatibility()
+
+    def _setup_backward_compatibility(self):
+        """Set up references for backward compatibility."""
+        # Volume references
+        self.volume_headers = self.volume_manager.volume_headers
+        self.expanded_volumes = self.volume_manager.expanded_volumes
+        self._volumes_in_new_data = self.volume_manager._volumes_in_new_data
+
+        # Network references
+        self.network_tables = self.network_manager.network_tables
+        self.network_headers = self.network_manager.network_headers
+        self.network_rows = self.network_manager.network_rows
+        self.expanded_networks = self.network_manager.expanded_networks
+        self._networks_in_new_data = self.network_manager._networks_in_new_data
+
+        # Stack references
+        self.stack_tables = self.stack_manager.stack_tables
+        self.stack_headers = self.stack_manager.stack_headers
+        self.container_rows = self.stack_manager.container_rows
+        self.expanded_stacks = self.stack_manager.expanded_stacks
+        self._stacks_in_new_data = self.stack_manager._stacks_in_new_data
+
+    def begin_update(self) -> None:
+        """Begin a batch update to prevent UI flickering during data updates."""
+        self._is_updating = True
+        self._pending_clear = len(self.children) == 0
+
+        # Clear all tables to ensure fresh data
+        self.network_manager.clear_tables()
+        self.stack_manager.clear_tables()
+
+        # Reset tracking for new data
+        self.volume_manager.reset_tracking()
+        self.network_manager.reset_tracking()
+        self.stack_manager.reset_tracking()
+
+        # Ensure section headers are created
+        self._ensure_section_headers()
 
     def end_update(self) -> None:
         """End a batch update and apply pending changes to the UI."""
@@ -50,224 +102,33 @@ class ContainerList(ContainerListBase):
 
     def _cleanup_removed_items(self) -> None:
         """Remove volumes, networks, and stacks that no longer exist."""
-        # Volumes cleanup
-        volumes_to_remove = []
-        for volume_name in list(self.volume_headers.keys()):
-            if volume_name not in self._volumes_in_new_data:
-                volumes_to_remove.append(volume_name)
-
-        # Networks cleanup
-        networks_to_remove = []
-        for network_name in list(self.network_headers.keys()):
-            if network_name not in self._networks_in_new_data:
-                networks_to_remove.append(network_name)
-
-        # Stacks cleanup
-        stacks_to_remove = []
-        for stack_name in list(self.stack_headers.keys()):
-            if stack_name not in self._stacks_in_new_data:
-                stacks_to_remove.append(stack_name)
-
-        # Remove obsolete volumes
-        for volume_name in volumes_to_remove:
-            self._remove_volume(volume_name)
-
-        # Remove obsolete networks
-        for network_name in networks_to_remove:
-            self._remove_network(network_name)
-
-        # Remove obsolete stacks
-        for stack_name in stacks_to_remove:
-            self._remove_stack(stack_name)
-
-    def _remove_volume(self, volume_name: str) -> None:
-        """Remove a volume and its associated UI elements."""
-        self.expanded_volumes.discard(volume_name)
-
-        if self.volumes_container:
-            for child in list(self.volumes_container.children):
-                if isinstance(child, Container) and "volume-container" in child.classes:
-                    for widget in child.children:
-                        if (
-                            isinstance(widget, VolumeHeader)
-                            and widget.volume_name == volume_name
-                        ):
-                            child.remove()
-                            break
-
-        if volume_name in self.volume_headers:
-            del self.volume_headers[volume_name]
-
-        if (
-            self.selected_item
-            and self.selected_item[0] == "volume"
-            and self.selected_item[1] == volume_name
-        ):
-            self.selected_item = None
-            self.selected_volume_data = None
-
-    def _remove_network(self, network_name: str) -> None:
-        """Remove a network and its associated UI elements."""
-        self.expanded_networks.discard(network_name)
-
-        if self.networks_container:
-            for child in list(self.networks_container.children):
-                if (
-                    isinstance(child, Container)
-                    and "network-container" in child.classes
-                ):
-                    for widget in child.children:
-                        if (
-                            isinstance(widget, NetworkHeader)
-                            and widget.network_name == network_name
-                        ):
-                            child.remove()
-                            break
-
-        if network_name in self.network_headers:
-            del self.network_headers[network_name]
-        if network_name in self.network_tables:
-            del self.network_tables[network_name]
-
-        if (
-            self.selected_item
-            and self.selected_item[0] == "network"
-            and self.selected_item[1] == network_name
-        ):
-            self.selected_item = None
-            self.selected_network_data = None
-
-    def _remove_stack(self, stack_name: str) -> None:
-        """Remove a stack and its associated UI elements."""
-        self.expanded_stacks.discard(stack_name)
-
-        # Remove UI widgets
-        if self.stacks_container:
-            for child in list(self.stacks_container.children):
-                if isinstance(child, Container) and "stack-container" in child.classes:
-                    for widget in child.children:
-                        if (
-                            isinstance(widget, StackHeader)
-                            and widget.stack_name == stack_name
-                        ):
-                            child.remove()
-                            break
-
-        # Remove from tracking dictionaries
-        if stack_name in self.stack_headers:
-            del self.stack_headers[stack_name]
-        if stack_name in self.stack_tables:
-            del self.stack_tables[stack_name]
-
-        # Remove container rows that belonged to this stack
-        containers_to_remove = [
-            cid
-            for cid, (cstack, _) in self.container_rows.items()
-            if cstack == stack_name
-        ]
-        for cid in containers_to_remove:
-            del self.container_rows[cid]
-
-        # Clear selection if needed
-        if (
-            self.selected_item
-            and self.selected_item[0] == "stack"
-            and self.selected_item[1] == stack_name
-        ):
-            self.selected_item = None
-            self.selected_stack_data = None
-        elif (
-            self.selected_item
-            and self.selected_item[0] == "container"
-            and self.selected_item[1] in containers_to_remove
-        ):
-            self.selected_item = None
-            self.selected_container_data = None
+        # Delegate to managers
+        self.volume_manager.cleanup_removed_volumes()
+        self.network_manager.cleanup_removed_networks()
+        self.stack_manager.cleanup_removed_stacks()
 
     def _prepare_new_containers(self) -> None:
         """Prepare containers that need to be added to the UI."""
-        self.new_volume_containers = {}
-        self.new_network_containers = {}
-        self.new_stack_containers = {}
-
-        # Find existing containers
-        self.existing_volume_containers = {}
-        self.existing_network_containers = {}
-        self.existing_stack_containers = {}
-
+        # Get existing containers from managers
         if not self._pending_clear:
-            # Find existing volumes
-            if self.volumes_container:
-                for child in self.volumes_container.children:
-                    if (
-                        isinstance(child, Container)
-                        and "volume-container" in child.classes
-                    ):
-                        for widget in child.children:
-                            if isinstance(widget, VolumeHeader):
-                                self.existing_volume_containers[widget.volume_name] = (
-                                    child
-                                )
-                                break
+            self.existing_volume_containers = (
+                self.volume_manager.get_existing_containers()
+            )
+            self.existing_network_containers = (
+                self.network_manager.get_existing_containers()
+            )
+            self.existing_stack_containers = (
+                self.stack_manager.get_existing_containers()
+            )
+        else:
+            self.existing_volume_containers = {}
+            self.existing_network_containers = {}
+            self.existing_stack_containers = {}
 
-            # Find existing networks
-            if self.networks_container:
-                for child in self.networks_container.children:
-                    if (
-                        isinstance(child, Container)
-                        and "network-container" in child.classes
-                    ):
-                        for widget in child.children:
-                            if isinstance(widget, NetworkHeader):
-                                self.existing_network_containers[
-                                    widget.network_name
-                                ] = child
-                                break
-
-            # Find existing stacks
-            if self.stacks_container:
-                for child in self.stacks_container.children:
-                    if (
-                        isinstance(child, Container)
-                        and "stack-container" in child.classes
-                    ):
-                        for widget in child.children:
-                            if isinstance(widget, StackHeader):
-                                self.existing_stack_containers[widget.stack_name] = (
-                                    child
-                                )
-                                break
-
-        # Prepare new volumes
-        for volume_name in sorted(self.volume_headers.keys()):
-            if volume_name not in self.existing_volume_containers:
-                header = self.volume_headers[volume_name]
-                volume_container = Container(classes="volume-container")
-                self.new_volume_containers[volume_name] = (
-                    volume_container,
-                    header,
-                    None,  # No table for volumes
-                )
-
-        # Prepare new networks
-        for network_name in sorted(self.network_headers.keys()):
-            if network_name not in self.existing_network_containers:
-                header = self.network_headers[network_name]
-                table = self.network_tables[network_name]
-                network_container = Container(classes="network-container")
-                self.new_network_containers[network_name] = (
-                    network_container,
-                    header,
-                    table,
-                )
-
-        # Prepare new stacks
-        for stack_name in sorted(self.stack_headers.keys()):
-            if stack_name not in self.existing_stack_containers:
-                header = self.stack_headers[stack_name]
-                table = self.stack_tables[stack_name]
-                stack_container = Container(classes="stack-container")
-                self.new_stack_containers[stack_name] = (stack_container, header, table)
+        # Prepare new containers using managers
+        self.new_volume_containers = self.volume_manager.prepare_new_containers()
+        self.new_network_containers = self.network_manager.prepare_new_containers()
+        self.new_stack_containers = self.stack_manager.prepare_new_containers()
 
     def _mount_all_sections(self) -> None:
         """Mount all sections when starting fresh."""
@@ -475,15 +336,9 @@ class ContainerList(ContainerListBase):
     def clear(self) -> None:
         """Clear all stacks and containers while preserving expansion states."""
         # Save expanded states before clearing
-        self.expanded_volumes = {
-            name for name, header in self.volume_headers.items() if header.expanded
-        }
-        self.expanded_stacks = {
-            name for name, header in self.stack_headers.items() if header.expanded
-        }
-        self.expanded_networks = {
-            name for name, header in self.network_headers.items() if header.expanded
-        }
+        self.volume_manager.save_expanded_state()
+        self.network_manager.save_expanded_state()
+        self.stack_manager.save_expanded_state()
 
         # Save focused widget if any
         focused = self.screen.focused if self.screen else None
@@ -528,48 +383,9 @@ class ContainerList(ContainerListBase):
         Args:
             volume_data: Dictionary containing volume information
         """
-        volume_name = volume_data["name"]
-
-        # Track that this volume exists in the new data
-        self._volumes_in_new_data.add(volume_name)
-
-        if volume_name not in self.volume_headers:
-            header = VolumeHeader(
-                volume_name,
-                volume_data["driver"],
-                volume_data["mountpoint"],
-                volume_data["created"],
-                volume_data["stack"],
-                volume_data["scope"],
-            )
-
-            self.volume_headers[volume_name] = header
-            # No table needed for volumes since they don't expand
-
-            # Update selected volume data if this is the selected volume
-            if (
-                self.selected_item
-                and self.selected_item[0] == "volume"
-                and self.selected_item[1] == volume_name
-            ):
-                self.selected_volume_data = volume_data
-        else:
-            # Update existing volume
-            header = self.volume_headers[volume_name]
-            header.driver = volume_data["driver"]
-            header.mountpoint = volume_data["mountpoint"]
-            header.created = volume_data["created"]
-            header.stack = volume_data["stack"]
-            header.scope = volume_data["scope"]
-            header._update_content()
-
-            # Update selected volume data if this is the selected volume
-            if (
-                self.selected_item
-                and self.selected_item[0] == "volume"
-                and self.selected_item[1] == volume_name
-            ):
-                self.selected_volume_data = volume_data
+        self.volume_manager.add_volume(volume_data)
+        # Update selected_volume_data reference for backward compatibility
+        self.selected_volume_data = self.volume_manager.selected_volume_data
 
     def add_network(self, network_data: dict) -> None:
         """Add or update a network section in the container list.
@@ -577,57 +393,9 @@ class ContainerList(ContainerListBase):
         Args:
             network_data: Dictionary containing network information
         """
-        network_name = network_data["name"]
-
-        # Track that this network exists in the new data
-        self._networks_in_new_data.add(network_name)
-
-        if network_name not in self.network_tables:
-            header = NetworkHeader(
-                network_name,
-                network_data["driver"],
-                network_data["scope"],
-                network_data["subnet"],
-                network_data["total_containers"],
-                network_data["connected_stacks"],
-            )
-            table = self.create_network_table(network_name)
-
-            self.network_headers[network_name] = header
-            self.network_tables[network_name] = table
-
-            if network_name in self.expanded_networks:
-                header.expanded = True
-                table.styles.display = "block"
-
-            # Update selected network data if this is the selected network
-            if (
-                self.selected_item
-                and self.selected_item[0] == "network"
-                and self.selected_item[1] == network_name
-            ):
-                self.selected_network_data = network_data
-        else:
-            header = self.network_headers[network_name]
-            was_expanded = header.expanded
-            header.driver = network_data["driver"]
-            header.scope = network_data["scope"]
-            header.subnet = network_data["subnet"]
-            header.total_containers = network_data["total_containers"]
-            header.connected_stacks = network_data["connected_stacks"]
-            header.expanded = was_expanded
-            self.network_tables[network_name].styles.display = (
-                "block" if was_expanded else "none"
-            )
-            header._update_content()
-
-            # Update selected network data if this is the selected network
-            if (
-                self.selected_item
-                and self.selected_item[0] == "network"
-                and self.selected_item[1] == network_name
-            ):
-                self.selected_network_data = network_data
+        self.network_manager.add_network(network_data)
+        # Update selected_network_data reference for backward compatibility
+        self.selected_network_data = self.network_manager.selected_network_data
 
     def add_container_to_network(self, network_name: str, container_data: dict) -> None:
         """Add or update a container in its network's table.
@@ -636,35 +404,7 @@ class ContainerList(ContainerListBase):
             network_name: Name of the network the container is connected to
             container_data: Dictionary containing container information
         """
-        if network_name not in self.network_tables:
-            logger.warning(
-                f"Network {network_name} not found when trying to add container"
-            )
-            return
-
-        table = self.network_tables[network_name]
-        container_id = container_data["id"]
-
-        row_data = (
-            container_data["id"],
-            container_data["name"],
-            container_data["stack"],
-            container_data["ip"],
-        )
-
-        try:
-            # Add as a new row
-            row_key = table.row_count
-            table.add_row(*row_data)
-            self.network_rows[f"{network_name}:{container_id}"] = (
-                network_name,
-                row_key,
-            )
-        except Exception as e:
-            logger.error(
-                f"Error adding container {container_id} to network {network_name}: {str(e)}",
-                exc_info=True,
-            )
+        self.network_manager.add_container_to_network(network_name, container_data)
 
     def add_stack(
         self,
@@ -687,71 +427,11 @@ class ContainerList(ContainerListBase):
             can_recreate: Whether the stack can be recreated (compose file accessible)
             has_compose_file: Whether a compose file path is defined
         """
-        # Track that this stack exists in the new data
-        self._stacks_in_new_data.add(name)
-
-        if name not in self.stack_tables:
-            header = StackHeader(
-                name,
-                config_file,
-                running,
-                exited,
-                total,
-                can_recreate,
-                has_compose_file,
-            )
-            table = self.create_stack_table(name)
-
-            self.stack_headers[name] = header
-            self.stack_tables[name] = table
-
-            if name in self.expanded_stacks:
-                header.expanded = True
-                table.styles.display = "block"
-
-            # Update selected stack data if this is the selected stack
-            if (
-                self.selected_item
-                and self.selected_item[0] == "stack"
-                and self.selected_item[1] == name
-            ):
-                self.selected_stack_data = {
-                    "name": name,
-                    "config_file": config_file,
-                    "running": running,
-                    "exited": exited,
-                    "total": total,
-                    "can_recreate": can_recreate,
-                    "has_compose_file": has_compose_file,
-                }
-        else:
-            header = self.stack_headers[name]
-            was_expanded = header.expanded
-            header.running = running
-            header.exited = exited
-            header.total = total
-            header.config_file = config_file
-            header.can_recreate = can_recreate
-            header.has_compose_file = has_compose_file
-            header.expanded = was_expanded
-            self.stack_tables[name].styles.display = "block" if was_expanded else "none"
-            header._update_content()
-
-            # Update selected stack data if this is the selected stack
-            if (
-                self.selected_item
-                and self.selected_item[0] == "stack"
-                and self.selected_item[1] == name
-            ):
-                self.selected_stack_data = {
-                    "name": name,
-                    "config_file": config_file,
-                    "running": running,
-                    "exited": exited,
-                    "total": total,
-                    "can_recreate": can_recreate,
-                    "has_compose_file": has_compose_file,
-                }
+        self.stack_manager.add_stack(
+            name, config_file, running, exited, total, can_recreate, has_compose_file
+        )
+        # Update selected_stack_data reference for backward compatibility
+        self.selected_stack_data = self.stack_manager.selected_stack_data
 
     def add_container_to_stack(self, stack_name: str, container_data: dict) -> None:
         """Add or update a container in its stack's table.
@@ -760,93 +440,9 @@ class ContainerList(ContainerListBase):
             stack_name: Name of the stack the container belongs to
             container_data: Dictionary containing container information
         """
-        if stack_name not in self.stack_tables:
-            self.add_stack(stack_name, "N/A", 0, 0, 0)
-
-        table = self.stack_tables[stack_name]
-        container_id = container_data["id"]
-
-        # Format PIDs to show "N/A" when 0
-        pids_display = (
-            "N/A" if container_data["pids"] == "0" else container_data["pids"]
-        )
-
-        row_data = (
-            container_data["id"],
-            container_data["name"],
-            container_data["status"],
-            container_data["cpu"],
-            container_data["memory"],
-            pids_display,
-            container_data["ports"],
-        )
-
-        # Update selected container data if this is the selected container
-        if (
-            self.selected_item
-            and self.selected_item[0] == "container"
-            and self.selected_item[1] == container_id
-        ):
-            self.selected_container_data = container_data
-
-        try:
-            # Since we clear container_rows at the beginning of each update cycle,
-            # we'll always be adding new rows during a refresh
-            if self._is_updating:
-                # Add as a new row
-                row_key = table.row_count
-                table.add_row(*row_data)
-                self.container_rows[container_id] = (stack_name, row_key)
-            else:
-                # For individual updates outside of a batch update cycle,
-                # check if this container already exists in the table
-                if container_id in self.container_rows:
-                    existing_stack, existing_row = self.container_rows[container_id]
-
-                    # If the container moved to a different stack, remove it from the old one
-                    if (
-                        existing_stack != stack_name
-                        and existing_stack in self.stack_tables
-                    ):
-                        old_table = self.stack_tables[existing_stack]
-                        try:
-                            old_table.remove_row(existing_row)
-                            # Update row indices for containers after this one
-                            for cid, (cstack, crow) in list(
-                                self.container_rows.items()
-                            ):
-                                if cstack == existing_stack and crow > existing_row:
-                                    self.container_rows[cid] = (cstack, crow - 1)
-                        except Exception as e:
-                            logger.error(
-                                f"Error removing container {container_id} from old stack: {str(e)}",
-                                exc_info=True,
-                            )
-
-                        # Add to the new stack
-                        row_key = table.row_count
-                        table.add_row(*row_data)
-                        self.container_rows[container_id] = (stack_name, row_key)
-                    else:
-                        # Update the existing row in the same stack
-                        try:
-                            for col_idx, value in enumerate(row_data):
-                                table.update_cell(existing_row, col_idx, value)
-                        except Exception as e:
-                            logger.error(
-                                f"Error updating container {container_id}: {str(e)}",
-                                exc_info=True,
-                            )
-                else:
-                    # Add as a new row
-                    row_key = table.row_count
-                    table.add_row(*row_data)
-                    self.container_rows[container_id] = (stack_name, row_key)
-
-        except Exception as e:
-            logger.error(
-                f"Error adding container {container_id}: {str(e)}", exc_info=True
-            )
+        self.stack_manager.add_container_to_stack(stack_name, container_data)
+        # Update selected_container_data reference for backward compatibility
+        self.selected_container_data = self.stack_manager.selected_container_data
 
     def on_mount(self) -> None:
         """Handle initial widget mount by focusing and expanding the first stack."""
@@ -893,32 +489,12 @@ class ContainerList(ContainerListBase):
         Args:
             volume_name: Name of the volume to select
         """
-        if volume_name in self.volume_headers:
-            # Clear any previous selection
-            self.selected_item = ("volume", volume_name)
-            self.selected_container_data = None
-            self.selected_stack_data = None
-            self.selected_network_data = None
-
-            # Store volume data for footer display
-            header = self.volume_headers[volume_name]
-            self.selected_volume_data = {
-                "name": volume_name,
-                "driver": header.driver,
-                "mountpoint": header.mountpoint,
-                "created": header.created,
-                "stack": header.stack,
-                "scope": header.scope,
-            }
-
-            # Update the footer and cursor visibility
-            self._update_footer_with_selection()
-            self._update_cursor_visibility()
-
-            # Post selection change message
-            self.post_message(
-                SelectionChanged("volume", volume_name, self.selected_volume_data)
-            )
+        self.volume_manager.select_volume(volume_name)
+        # Update references for backward compatibility
+        self.selected_volume_data = self.volume_manager.selected_volume_data
+        self.selected_network_data = self.network_manager.selected_network_data
+        self.selected_stack_data = self.stack_manager.selected_stack_data
+        self.selected_container_data = self.stack_manager.selected_container_data
 
     def select_network(self, network_name: str) -> None:
         """Select a network and update the footer.
@@ -926,32 +502,12 @@ class ContainerList(ContainerListBase):
         Args:
             network_name: Name of the network to select
         """
-        if network_name in self.network_headers:
-            # Clear any previous selection
-            self.selected_item = ("network", network_name)
-            self.selected_container_data = None
-            self.selected_stack_data = None
-            self.selected_volume_data = None
-
-            # Store network data for footer display
-            header = self.network_headers[network_name]
-            self.selected_network_data = {
-                "name": network_name,
-                "driver": header.driver,
-                "scope": header.scope,
-                "subnet": header.subnet,
-                "total_containers": header.total_containers,
-                "connected_stacks": header.connected_stacks,
-            }
-
-            # Update the footer and cursor visibility
-            self._update_footer_with_selection()
-            self._update_cursor_visibility()
-
-            # Post selection change message
-            self.post_message(
-                SelectionChanged("network", network_name, self.selected_network_data)
-            )
+        self.network_manager.select_network(network_name)
+        # Update references for backward compatibility
+        self.selected_volume_data = self.volume_manager.selected_volume_data
+        self.selected_network_data = self.network_manager.selected_network_data
+        self.selected_stack_data = self.stack_manager.selected_stack_data
+        self.selected_container_data = self.stack_manager.selected_container_data
 
     def select_stack(self, stack_name: str) -> None:
         """Select a stack and update the footer.
@@ -959,33 +515,12 @@ class ContainerList(ContainerListBase):
         Args:
             stack_name: Name of the stack to select
         """
-        if stack_name in self.stack_headers:
-            # Clear any previous selection
-            self.selected_item = ("stack", stack_name)
-            self.selected_container_data = None
-            self.selected_volume_data = None
-            self.selected_network_data = None
-
-            # Store stack data for footer display
-            header = self.stack_headers[stack_name]
-            self.selected_stack_data = {
-                "name": stack_name,
-                "config_file": header.config_file,
-                "running": header.running,
-                "exited": header.exited,
-                "total": header.total,
-                "can_recreate": header.can_recreate,
-                "has_compose_file": header.has_compose_file,
-            }
-
-            # Update the footer and cursor visibility
-            self._update_footer_with_selection()
-            self._update_cursor_visibility()
-
-            # Post selection change message
-            self.post_message(
-                SelectionChanged("stack", stack_name, self.selected_stack_data)
-            )
+        self.stack_manager.select_stack(stack_name)
+        # Update references for backward compatibility
+        self.selected_volume_data = self.volume_manager.selected_volume_data
+        self.selected_network_data = self.network_manager.selected_network_data
+        self.selected_stack_data = self.stack_manager.selected_stack_data
+        self.selected_container_data = self.stack_manager.selected_container_data
 
     def select_container(self, container_id: str) -> None:
         """Select a container and update the footer.
@@ -993,73 +528,12 @@ class ContainerList(ContainerListBase):
         Args:
             container_id: ID of the container to select
         """
-        if container_id in self.container_rows:
-            # Clear any previous selection
-            self.selected_item = ("container", container_id)
-            self.selected_stack_data = None
-            self.selected_volume_data = None
-            self.selected_network_data = None
-
-            # Find the container data
-            stack_name, row_idx = self.container_rows[container_id]
-            table = self.stack_tables[stack_name]
-
-            # Get container data from the table
-            container_data = {
-                "id": table.get_cell_at((row_idx, 0)),
-                "name": table.get_cell_at((row_idx, 1)),
-                "status": table.get_cell_at((row_idx, 2)),
-                "cpu": table.get_cell_at((row_idx, 3)),
-                "memory": table.get_cell_at((row_idx, 4)),
-                "pids": table.get_cell_at((row_idx, 5)),
-                "ports": table.get_cell_at((row_idx, 6)),
-                "stack": stack_name,
-            }
-
-            self.selected_container_data = container_data
-
-            # Make sure the stack is expanded
-            header = self.stack_headers[stack_name]
-            if not header.expanded:
-                header.expanded = True
-                table.styles.display = "block"
-                header._update_content()
-
-            # Check if the search input is currently focused
-            if self.screen and self.screen.focused:
-                focused_widget = self.screen.focused
-                if (
-                    hasattr(focused_widget, "id")
-                    and focused_widget.id == "search-input"
-                ):
-                    # Still position the cursor on the selected row without focusing
-                    if table.cursor_row != row_idx:
-                        table.move_cursor(row=row_idx)
-                else:
-                    # Focus the table and position the cursor
-                    table.focus()
-                    if table.cursor_row != row_idx:
-                        table.move_cursor(row=row_idx)
-            else:
-                # Focus the table and position the cursor
-                table.focus()
-                if table.cursor_row != row_idx:
-                    table.move_cursor(row=row_idx)
-
-            # Force a refresh of the table to ensure the cursor is visible
-            table.refresh()
-
-            # Update the footer with selection
-            self._update_footer_with_selection()
-
-            # Post selection change message
-            self.post_message(
-                SelectionChanged(
-                    "container", container_id, self.selected_container_data
-                )
-            )
-        else:
-            logger.error(f"Container ID {container_id} not found in container_rows")
+        self.stack_manager.select_container(container_id)
+        # Update references for backward compatibility
+        self.selected_volume_data = self.volume_manager.selected_volume_data
+        self.selected_network_data = self.network_manager.selected_network_data
+        self.selected_stack_data = self.stack_manager.selected_stack_data
+        self.selected_container_data = self.stack_manager.selected_container_data
 
     def _update_footer_with_selection(self) -> None:
         """Update the footer with the current selection information."""
