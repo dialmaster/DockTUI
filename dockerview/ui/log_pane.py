@@ -1,8 +1,5 @@
 import logging
-import os
-import platform
 import queue
-import subprocess
 import threading
 from collections import deque
 
@@ -17,76 +14,9 @@ from textual.widget import Widget
 from textual.widgets import Checkbox, Input, Label, RichLog, Select, Static, TextArea
 
 from ..config import config
+from ..utils.clipboard import copy_to_clipboard_async, copy_to_clipboard_sync
 
 logger = logging.getLogger("dockerview.log_pane")
-
-
-def copy_to_clipboard_sync(text):
-    """Copy text to clipboard synchronously, with WSL2 support."""
-    try:
-        # Try using pyperclip first
-        import pyperclip
-
-        pyperclip.copy(text)
-        return True
-    except Exception as e:
-        pass  # pyperclip not available, try fallbacks
-
-    # Fallback for WSL2
-    try:
-        # Check if we're in WSL
-        if "microsoft" in platform.uname().release.lower() or "WSL" in os.environ.get(
-            "WSL_DISTRO_NAME", ""
-        ):
-            # Use PowerShell through WSL interop
-            process = subprocess.Popen(
-                ["powershell.exe", "-command", "Set-Clipboard"],
-                stdin=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                text=True,
-            )
-            process.communicate(input=text, timeout=2.0)  # 2 second timeout
-            return process.returncode == 0
-    except subprocess.TimeoutExpired:
-        return False
-    except Exception as e:
-        pass  # WSL clipboard fallback failed
-
-    # Try xclip as another fallback
-    try:
-        process = subprocess.Popen(
-            ["xclip", "-selection", "clipboard"],
-            stdin=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            text=True,
-        )
-        process.communicate(input=text, timeout=1.0)  # 1 second timeout
-        return process.returncode == 0
-    except subprocess.TimeoutExpired:
-        return False
-    except Exception as e:
-        pass  # xclip failed
-
-    return False
-
-
-def copy_to_clipboard_async(text, callback=None):
-    """Copy text to clipboard in a background thread.
-
-    Args:
-        text: Text to copy
-        callback: Optional callback function that receives (success: bool)
-    """
-
-    def _copy_thread():
-        success = copy_to_clipboard_sync(text)
-        if callback:
-            callback(success)
-
-    thread = threading.Thread(target=_copy_thread, daemon=True)
-    thread.start()
 
 
 class LogTextArea(TextArea):
@@ -114,9 +44,10 @@ class LogTextArea(TextArea):
                         )
                     else:
                         logger.error("Failed to copy to clipboard")
+                        # Show error notification from main thread
                         self.app.call_from_thread(
                             self.app.notify,
-                            "Copy failed - clipboard not available",
+                            "Failed to copy to clipboard. Please install xclip or pyperclip.",
                             severity="error",
                             timeout=3,
                         )
@@ -1078,8 +1009,9 @@ class LogPane(Vertical):
                         )
                     else:
                         logger.error("Failed to copy to clipboard")
+                        # Show error notification
                         self.app.notify(
-                            "Copy failed - clipboard not available",
+                            "Failed to copy to clipboard. Please install xclip or pyperclip.",
                             severity="error",
                             timeout=3,
                         )

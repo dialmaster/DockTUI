@@ -90,14 +90,26 @@ log:
 ### Environment Variable Overrides
 
 You can override any configuration value using environment variables:
+
+#### Log Configuration
 - `DOCKERVIEW_LOG_MAX_LINES` - Override `log.max_lines`
 - `DOCKERVIEW_LOG_TAIL` - Override `log.tail`
 - `DOCKERVIEW_LOG_SINCE` - Override `log.since`
 
+#### Clipboard Configuration
+- `DOCKERVIEW_IN_CONTAINER` - Set to `1`, `true`, or `yes` when running inside a container
+- `DOCKERVIEW_CLIPBOARD_FILE` - Path to a mounted file for clipboard sharing in containers
+
 Example:
 ```bash
+# Log configuration
 export DOCKERVIEW_LOG_TAIL=500
 export DOCKERVIEW_LOG_SINCE=1h
+
+# Container clipboard configuration
+export DOCKERVIEW_IN_CONTAINER=1
+export DOCKERVIEW_CLIPBOARD_FILE=/tmp/clipboard.txt
+
 ./start.sh
 ```
 
@@ -178,15 +190,35 @@ export DOCKERVIEW_DEBUG=1
 python -m dockerview
 ```
 
-### WSL2 Clipboard Support
+### Clipboard Support
 
-If you're running dockerview in WSL2 and want to use the clipboard functionality (right-click copy in log pane), you may need to install `xclip`:
+dockerview provides multiple clipboard integration methods to work across different environments:
+
+#### Local Environments
+- Uses `pyperclip` for cross-platform clipboard support (installed by default)
+- Falls back to `xclip` on Linux systems
+
+#### Linux/WSL2
+For clipboard functionality on Linux or WSL2, install `xclip`:
 
 ```bash
 sudo apt-get install xclip
 ```
 
-This is optional - dockerview will attempt to use PowerShell's clipboard integration first, but xclip provides a fallback.
+#### Container Environments
+When running dockerview in a container:
+
+1. **With X11 Forwarding**: Install `xclip` in your container and forward X11
+2. **With File-based Clipboard**: Mount a file for clipboard sharing:
+   ```bash
+   docker run -v /tmp/clipboard:/tmp/clipboard \
+              -e DOCKERVIEW_IN_CONTAINER=1 \
+              -e DOCKERVIEW_CLIPBOARD_FILE=/tmp/clipboard/clipboard.txt \
+              dockerview
+   ```
+
+#### Clipboard Fallback
+If clipboard access is unavailable, dockerview will display a modal dialog with the selected text for manual copying. This ensures you can always access copied text regardless of your environment.
 
 ## Limitations and Known Issues
 
