@@ -24,7 +24,6 @@ class LogTextArea(TextArea):
 
     def on_mouse_down(self, event: MouseDown) -> None:
         """Handle mouse down events for right-click copy."""
-        # Check if it's a right-click (button 3)
         if event.button == 3:
             # Check if there's selected text
             selection = self.selected_text
