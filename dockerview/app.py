@@ -483,42 +483,45 @@ class DockerViewApp(App):
             self.error_display.update(f"Error refreshing: {str(e)}")
 
     @work(thread=True)
-    def _refresh_containers_worker(self, callback) -> Tuple[Dict, Dict, List]:
-        """Worker function to fetch network, stack, and container data in a background thread.
+    def _refresh_containers_worker(self, callback) -> Tuple[Dict, Dict, Dict, List]:
+        """Worker function to fetch network, stack, volume and container data in a background thread.
 
         Args:
             callback: Function to call with the results when complete
 
         Returns:
-            Tuple[Dict, Dict, List]: A tuple containing:
+            Tuple[Dict, Dict, Dict, List]: A tuple containing:
                 - Dict: Mapping of network names to network information
                 - Dict: Mapping of stack names to stack information
+                - Dict: Mapping of volume names to volume information
                 - List: List of container information dictionaries
         """
         try:
-            # Get networks, stacks and containers in the thread
+            # Get networks, stacks, volumes and containers in the thread
             networks = self.docker.get_networks()
             stacks = self.docker.get_compose_stacks()
+            volumes = self.docker.get_volumes()
             containers = self.docker.get_containers()
 
             # Call the callback with the results
             # This will be executed in the main thread after the worker completes
-            self.call_from_thread(callback, networks, stacks, containers)
+            self.call_from_thread(callback, networks, stacks, volumes, containers)
 
-            return networks, stacks, containers
+            return networks, stacks, volumes, containers
         except Exception as e:
             logger.error(f"Error in refresh worker: {str(e)}", exc_info=True)
             self.call_from_thread(
                 self.error_display.update, f"Error refreshing: {str(e)}"
             )
-            return {}, {}, []
+            return {}, {}, {}, []
 
-    def _handle_refresh_results(self, networks, stacks, containers):
+    def _handle_refresh_results(self, networks, stacks, volumes, containers):
         """Handle the results from the refresh worker when they're ready.
 
         Args:
             networks: Dictionary of network information
             stacks: Dictionary of stack information
+            volumes: Dictionary of volume information
             containers: List of container information
         """
         try:
@@ -530,19 +533,20 @@ class DockerViewApp(App):
 
             # Schedule the UI update to run asynchronously
             asyncio.create_task(
-                self._update_ui_with_results(networks, stacks, containers)
+                self._update_ui_with_results(networks, stacks, volumes, containers)
             )
 
         except Exception as e:
             logger.error(f"Error handling refresh results: {str(e)}", exc_info=True)
             self.error_display.update(f"Error refreshing: {str(e)}")
 
-    async def _update_ui_with_results(self, networks, stacks, containers):
+    async def _update_ui_with_results(self, networks, stacks, volumes, containers):
         """Update the UI with the results from the refresh worker.
 
         Args:
             networks: Dictionary of network information
             stacks: Dictionary of stack information
+            volumes: Dictionary of volume information
             containers: List of container information
         """
 
@@ -551,17 +555,7 @@ class DockerViewApp(App):
             self.container_list.begin_update()
 
             try:
-                # Process all networks first
-                for network_name, network_info in networks.items():
-                    self.container_list.add_network(network_info)
-
-                    # Add containers to the network
-                    for container_info in network_info["connected_containers"]:
-                        self.container_list.add_container_to_network(
-                            network_name, container_info
-                        )
-
-                # Process all stacks next
+                # Process all stacks first
                 for stack_name, stack_info in stacks.items():
                     self.container_list.add_stack(
                         stack_name,
@@ -572,6 +566,20 @@ class DockerViewApp(App):
                         stack_info.get("can_recreate", True),
                         stack_info.get("has_compose_file", True),
                     )
+
+                # Process all volumes next
+                for volume_name, volume_info in volumes.items():
+                    self.container_list.add_volume(volume_info)
+
+                # Process all networks after volumes
+                for network_name, network_info in networks.items():
+                    self.container_list.add_network(network_info)
+
+                    # Add containers to the network
+                    for container_info in network_info["connected_containers"]:
+                        self.container_list.add_container_to_network(
+                            network_name, container_info
+                        )
 
                 # Process all containers in a single batch
                 # Sort containers by stack to minimize UI updates

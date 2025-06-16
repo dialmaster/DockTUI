@@ -533,6 +533,61 @@ class DockerManager:
 
         return networks
 
+    def get_volumes(self) -> Dict[str, Dict]:
+        """Retrieve all Docker volumes with their stack associations.
+
+        Returns:
+            Dict[str, Dict]: A dictionary mapping volume names to their details including:
+                - name: Volume name
+                - driver: Volume driver
+                - mountpoint: Volume mount point on the host
+                - created: Creation timestamp
+                - labels: Volume labels
+                - stack: Associated Docker Compose stack name (if any)
+                - scope: Volume scope
+        """
+        volumes = {}
+        try:
+            docker_volumes = self.client.volumes.list()
+
+            for volume in docker_volumes:
+                try:
+                    # Get volume attributes
+                    attrs = volume.attrs
+                    labels = attrs.get("Labels", {}) or {}
+
+                    # Determine stack association from labels
+                    stack_name = labels.get("com.docker.compose.project", None)
+
+                    volumes[volume.name] = {
+                        "name": volume.name,
+                        "driver": attrs.get("Driver", "unknown"),
+                        "mountpoint": attrs.get("Mountpoint", "N/A"),
+                        "created": attrs.get("CreatedAt", "N/A"),
+                        "labels": labels,
+                        "stack": stack_name,
+                        "scope": attrs.get("Scope", "local"),
+                    }
+
+                    logger.debug(
+                        f"Found volume {volume.name} with stack association: {stack_name}"
+                    )
+
+                except Exception as volume_error:
+                    logger.error(
+                        f"Error processing volume {volume.name}: {str(volume_error)}",
+                        exc_info=True,
+                    )
+                    continue
+
+        except Exception as e:
+            error_msg = f"Error getting volumes: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            self.last_error = error_msg
+            return {}
+
+        return volumes
+
     def execute_stack_command(
         self, stack_name: str, config_file: str, command: str
     ) -> bool:
