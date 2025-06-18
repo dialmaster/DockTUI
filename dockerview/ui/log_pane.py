@@ -207,6 +207,9 @@ class LogPane(Vertical):
         # Track if we've received any logs yet
         self.initial_log_check_done = False
         self.waiting_for_logs = False
+        self.showing_no_logs_message = (
+            False  # Track when we're showing the "no logs found" message
+        )
 
         # Docker client for SDK streaming
         try:
@@ -388,9 +391,6 @@ class LogPane(Vertical):
                     return
             return
 
-        # Stop any existing log streaming
-        self._stop_logs()
-
         # Update state
         self.current_item = (item_type, item_id)
         self.current_item_data = item_data
@@ -426,20 +426,25 @@ class LogPane(Vertical):
         self.log_display.clear()
         self.all_log_lines.clear()  # Clear the deque
         self.filtered_line_count = 0
+        self.showing_no_logs_message = False  # Reset when clearing logs
 
-        # Check if this is a container and if it's not running
+        # Check if this is a container and if it's not running - do this BEFORE stopping logs
         if item_type == "container" and item_data.get("status"):
             status = item_data["status"].lower()
             if "exited" in status or "stopped" in status or "created" in status:
-                # Container is not running, show appropriate message
+                # Container is not running, show appropriate message immediately
                 self.log_display.text = f"Container '{item_data.get('name', item_id)}' is not running.\nStatus: {item_data['status']}"
-                self.refresh()
+                # Stop any existing log streaming (non-blocking)
+                self._stop_logs_async()
                 return
 
-        # Refresh to ensure visibility changes take effect
-        self.refresh()
+        # Show loading message immediately
+        self.log_display.text = f"Loading logs for {item_type}: {item_id}...\n"
 
-        # Start streaming logs
+        # Stop any existing log streaming asynchronously to avoid blocking
+        self._stop_logs_async()
+
+        # Start streaming logs without refresh to avoid blocking
         self._start_logs()
 
     def clear_selection(self):
@@ -482,6 +487,7 @@ class LogPane(Vertical):
         self.log_display.clear()
         self.all_log_lines.clear()  # Clear the deque
         self.filtered_line_count = 0
+        self.showing_no_logs_message = False  # Reset when status changes
 
         status = item_data.get("status", "").lower()
 
@@ -491,8 +497,8 @@ class LogPane(Vertical):
             self.refresh()
         elif "running" in status or "up" in status:
             # Container is running, start streaming logs
+            self.log_display.clear()
             self.log_display.text = f"Container '{item_data.get('name', self.current_item[1])}' started. Loading logs...\n"
-            self.refresh()
             self._start_logs()
 
     def _start_logs(self):
@@ -507,12 +513,12 @@ class LogPane(Vertical):
         self.log_session_id += 1
         current_session_id = self.log_session_id
 
-        # Add a loading message
-        self.log_display.text = f"Loading logs for {item_type}: {item_id}...\n"
+        # Note: Loading message is already shown in update_selection()
         self.waiting_for_logs = True
         self.initial_log_check_done = False
+        self.showing_no_logs_message = False  # Reset the flag when starting new logs
 
-        # Start the log worker thread with session ID
+        # Clear stop event for the new thread
         self.stop_event.clear()
         self.log_thread = threading.Thread(
             target=self._log_worker, args=(current_session_id,), daemon=True
@@ -530,6 +536,18 @@ class LogPane(Vertical):
             self.log_thread.join(timeout=2)
 
         # Clear the queue
+        while not self.log_queue.empty():
+            try:
+                self.log_queue.get_nowait()
+            except queue.Empty:
+                break
+
+    def _stop_logs_async(self):
+        """Stop the current log streaming without blocking."""
+        # Signal the thread to stop
+        self.stop_event.set()
+
+        # Clear the queue without waiting for thread
         while not self.log_queue.empty():
             try:
                 self.log_queue.get_nowait()
@@ -580,7 +598,23 @@ class LogPane(Vertical):
             # Docker SDK expects since as datetime or Unix timestamp
             since = self._convert_since_to_timestamp(self.LOG_SINCE)
 
-            # Stream logs using Docker SDK
+            # First, quickly check if there are any logs without following
+            initial_logs = container.logs(
+                stream=False,
+                follow=False,
+                tail=1,  # Just check for one line
+                since=since,
+                stdout=True,
+                stderr=True,
+                timestamps=False,
+            )
+
+            # If no logs found initially, show message quickly
+            if not initial_logs or not initial_logs.strip():
+                self._check_no_logs_found()
+                # Still continue to stream in case new logs appear
+
+            # Now stream logs with follow
             log_stream = container.logs(
                 stream=True,
                 follow=True,
@@ -593,12 +627,6 @@ class LogPane(Vertical):
 
             line_count = 0
             has_any_logs = False
-
-            # Set a timer to check if we've received any logs
-            check_timer = threading.Timer(
-                2.0, lambda: self._check_no_logs_found() if not has_any_logs else None
-            )
-            check_timer.start()
 
             for line in log_stream:
                 if self.stop_event.is_set():
@@ -613,9 +641,6 @@ class LogPane(Vertical):
                     has_any_logs = True
                     line_count += 1
                     self.log_queue.put((session_id, "log", line))
-
-            # Cancel timer if still running
-            check_timer.cancel()
 
         except docker.errors.NotFound:
             self.log_queue.put(
@@ -692,9 +717,11 @@ class LogPane(Vertical):
             # Stream logs from all containers
             has_any_logs = False
 
-            # Set a timer to check if we've received any logs
+            # Set a shorter timer to check if we've received any logs
+            # This is a compromise - we can't do instant checks for stacks without
+            # potentially missing logs from some containers
             check_timer = threading.Timer(
-                2.0, lambda: self._check_no_logs_found() if not has_any_logs else None
+                0.5, lambda: self._check_no_logs_found() if not has_any_logs else None
             )
             check_timer.start()
 
@@ -791,12 +818,15 @@ class LogPane(Vertical):
                             if self.search_filter and self.filtered_line_count == 0:
                                 self.log_display.clear()
 
-                            # Append to the text area with a newline
-                            current_text = self.log_display.text
-                            if current_text and not current_text.endswith("\n"):
-                                self.log_display.text = current_text + "\n" + content
-                            else:
-                                self.log_display.text = current_text + content + "\n"
+                            # If we're showing the "no logs found" message, clear it
+                            if self.showing_no_logs_message:
+                                self.log_display.clear()
+                                self.showing_no_logs_message = False
+
+                            # Append to the text area
+                            # Move cursor to end first, then insert
+                            self.log_display.move_cursor(self.log_display.document.end)
+                            self.log_display.insert(content + "\n")
 
                             self.filtered_line_count += 1
 
@@ -812,37 +842,20 @@ class LogPane(Vertical):
                             # First line processing handled elsewhere
                     elif msg_type == "error":
                         # Display errors (don't store these in all_log_lines)
-                        current_text = self.log_display.text
                         error_msg = f"ERROR: {content}"
-                        if current_text and not current_text.endswith("\n"):
-                            self.log_display.text = (
-                                current_text + "\n" + error_msg + "\n"
-                            )
-                        else:
-                            self.log_display.text = current_text + error_msg + "\n"
+                        # Move cursor to end first, then insert
+                        self.log_display.move_cursor(self.log_display.document.end)
+                        self.log_display.insert(error_msg + "\n")
                         logger.error(f"Queue error message: {content}")
                     elif msg_type == "no_logs":
                         # Show informative message when no logs are found
                         if self.waiting_for_logs:
                             self.log_display.clear()
                             self.waiting_for_logs = False
-                            item_type, item_id = (
-                                self.current_item if self.current_item else ("", "")
+                            self.log_display.text = self._get_no_logs_message()
+                            self.showing_no_logs_message = (
+                                True  # Mark that we're showing the no logs message
                             )
-
-                            self.log_display.text = (
-                                f"No logs found for {item_type}: {item_id}\n\n"
-                            )
-                            self.log_display.text += "This could mean:\n"
-                            self.log_display.text += "  • The container/stack hasn't produced logs in the selected time range\n"
-                            self.log_display.text += (
-                                "  • The container/stack was recently started\n"
-                            )
-                            self.log_display.text += (
-                                "  • Logs may have been cleared or rotated\n\n"
-                            )
-                            self.log_display.text += "Try adjusting the log settings above to see more history.\n\n"
-                            self.log_display.text += "Waiting for new logs..."
 
                 except queue.Empty:
                     break
@@ -860,6 +873,19 @@ class LogPane(Vertical):
 
         except Exception as e:
             logger.error(f"Error processing log queue: {e}", exc_info=True)
+
+    def _get_no_logs_message(self):
+        """Get the formatted 'No logs found' message."""
+        item_type, item_id = self.current_item if self.current_item else ("", "")
+        return (
+            f"No logs found for {item_type}: {item_id}\n\n"
+            "This could mean:\n"
+            "  • The container/stack hasn't produced logs in the selected time range\n"
+            "  • The container/stack was recently started\n"
+            "  • Logs may have been cleared or rotated\n\n"
+            "Try adjusting the log settings above to see more history.\n\n"
+            "Waiting for new logs..."
+        )
 
     def _check_no_logs_found(self):
         """Check if no logs were found and show an informative message."""
@@ -907,6 +933,12 @@ class LogPane(Vertical):
         """Re-filter and display all stored log lines based on current search filter."""
         self.log_display.clear()
         self.filtered_line_count = 0  # Reset count
+
+        # If we're showing the "no logs found" message and there are no logs,
+        # preserve that message regardless of filter
+        if self.showing_no_logs_message and len(self.all_log_lines) == 0:
+            self.log_display.text = self._get_no_logs_message()
+            return
 
         # Build filtered text
         filtered_lines = []
@@ -974,19 +1006,20 @@ class LogPane(Vertical):
 
     def _restart_logs(self):
         """Restart log streaming with new settings."""
-        # Stop current logs
-        self._stop_logs()
-
-        # Clear display and show loading message
+        # Clear display and show loading message immediately
         self.log_display.clear()
         self.all_log_lines.clear()
         self.filtered_line_count = 0
+        self.showing_no_logs_message = False  # Reset when restarting logs
 
         # Show loading message
         item_type, item_id = self.current_item
         self.log_display.text = f"Reloading logs for {item_type}: {item_id}...\n"
         self.waiting_for_logs = True
         self.initial_log_check_done = False
+
+        # Stop current logs after showing the loading message
+        self._stop_logs()
 
         # Start logs again
         self._start_logs()
