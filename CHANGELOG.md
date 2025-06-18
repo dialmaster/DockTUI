@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4](https://github.com/dialmaster/dockerview/compare/v0.1.3...v0.1.4) (2025-06-18)
+
+
+### Features
+
+* add configurable refresh interval for container status updates ([d45d9fb](https://github.com/dialmaster/dockerview/commit/d45d9fb52f8ab865170a22e8289daf598db06355))
+* add configurable refresh interval for container status updates ([7d9f23d](https://github.com/dialmaster/dockerview/commit/7d9f23d72d81a053f9b611dc5363af4226d75d04))
+
+
+### Miscellaneous
+
+* add CODEOWNERS file for automatic PR reviewer assignment ([d45d9fb](https://github.com/dialmaster/dockerview/commit/d45d9fb52f8ab865170a22e8289daf598db06355))
+* add CODEOWNERS file for automatic PR reviewer assignment ([42ddb1f](https://github.com/dialmaster/dockerview/commit/42ddb1fdadce5e9578924c152f3c7ef9bec58025))
+
 ## [0.1.3](https://github.com/dialmaster/dockerview/compare/v0.1.2...v0.1.3) (2025-06-18)
 
 

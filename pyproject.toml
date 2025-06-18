@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dockerview"
-version = "0.1.3"
+version = "0.1.4"
 description = "An interactive terminal dashboard for monitoring and managing Docker Compose environments"
 authors = ["Chris Dial <dial.chris@gmail.com>"]
 license = "MIT"
