@@ -6,7 +6,7 @@ import threading
 import time
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import docker
 
@@ -21,6 +21,11 @@ class DockerManager:
         try:
             self.client = docker.from_env()
             self.last_error = None
+            # Track containers in transition (starting/stopping)
+            self._transition_states = (
+                {}
+            )  # {container_id: "starting..." or "stopping..."}
+            self._transition_lock = threading.Lock()
         except Exception as e:
             logger.error(f"Failed to initialize Docker client: {str(e)}", exc_info=True)
             raise
@@ -123,6 +128,8 @@ class DockerManager:
             self.last_error = error_msg
             return {}
 
+        # Clear any previous error if the operation succeeded
+        self.last_error = None
         return dict(stacks)
 
     def get_all_container_stats(self) -> Dict[str, Dict[str, str]]:
@@ -293,10 +300,16 @@ class DockerManager:
                             },
                         )
 
+                        # Check if container is in transition
+                        with self._transition_lock:
+                            status = self._transition_states.get(
+                                container.short_id, container.status
+                            )
+
                         container_info = {
                             "id": container.short_id,
                             "name": container.name,
-                            "status": container.status,
+                            "status": status,
                             "cpu": stats["cpu"],
                             "memory": stats["memory"],
                             "pids": stats["pids"],
@@ -317,6 +330,8 @@ class DockerManager:
             self.last_error = error_msg
             return []
 
+        # Clear any previous error if the operation succeeded
+        self.last_error = None
         return containers
 
     def _format_ports(self, container) -> str:
@@ -344,7 +359,9 @@ class DockerManager:
             )
             return ""
 
-    def execute_container_command(self, container_id: str, command: str) -> bool:
+    def execute_container_command(
+        self, container_id: str, command: str
+    ) -> Tuple[bool, str]:
         """Execute a command on a specific container.
 
         Args:
@@ -352,12 +369,13 @@ class DockerManager:
             command: Command to execute (start, stop, restart, recreate)
 
         Returns:
-            bool: True if successful, False otherwise
+            Tuple[bool, str]: (success, container_short_id) - True if successful, False otherwise
         """
         try:
             if command == "recreate":
                 # For recreate, we need to get the service name and stack name
                 container = self.client.containers.get(container_id)
+                container_short_id = container.short_id
                 stack_name = container.labels.get("com.docker.compose.project")
                 service_name = container.labels.get("com.docker.compose.service")
 
@@ -365,7 +383,7 @@ class DockerManager:
                     error_msg = "Cannot recreate container: missing compose project or service labels"
                     logger.error(error_msg)
                     self.last_error = error_msg
-                    return False
+                    return False, ""
 
                 # Get the compose config file(s)
                 config_files = container.labels.get(
@@ -379,7 +397,7 @@ class DockerManager:
                     )
                     logger.error(error_msg)
                     self.last_error = error_msg
-                    return False
+                    return False, ""
 
                 cmd = ["docker", "compose", "-p", stack_name]
 
@@ -392,20 +410,46 @@ class DockerManager:
                 cmd.extend(["up", "-d", service_name])
                 logger.info(f"Executing recreate command: {' '.join(cmd)}")
 
+                # Set transition state for recreate
+                with self._transition_lock:
+                    self._transition_states[container_short_id] = "recreating..."
+
                 # Use Popen to run the command in the background
                 process = subprocess.Popen(
                     cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
                 )
 
+                # Start a thread to monitor completion and clear transition state
+                def monitor_recreate():
+                    process.wait()  # Wait for process to complete
+                    with self._transition_lock:
+                        self._transition_states.pop(container_short_id, None)
+
+                thread = threading.Thread(target=monitor_recreate)
+                thread.daemon = True
+                thread.start()
+
+                # Clear any previous error if the operation succeeded
+                self.last_error = None
                 # We don't wait for the process to complete to keep the UI responsive
-                return True
+                return True, container_short_id
             else:
                 logger.info(
                     f"Executing container command: {command} on container {container_id}"
                 )
 
+                # Set transition state
+                with self._transition_lock:
+                    if command == "start":
+                        self._transition_states[container_id] = "starting..."
+                    elif command == "stop":
+                        self._transition_states[container_id] = "stopping..."
+                    elif command == "restart":
+                        self._transition_states[container_id] = "restarting..."
+
                 def run_container_command():
                     try:
+                        # Get container inside the thread to avoid blocking
                         container = self.client.containers.get(container_id)
 
                         if command == "start":
@@ -423,18 +467,24 @@ class DockerManager:
                             f"Error in container command thread: {str(e)}",
                             exc_info=True,
                         )
+                    finally:
+                        # Clear the transition state when done
+                        with self._transition_lock:
+                            self._transition_states.pop(container_id, None)
 
                 # Run the command in a separate thread to avoid blocking
                 thread = threading.Thread(target=run_container_command)
                 thread.daemon = True
                 thread.start()
 
-            return True
+            # Clear any previous error if the operation succeeded
+            self.last_error = None
+            return True, container_id
         except Exception as e:
             error_msg = f"Error executing container command: {str(e)}"
             logger.error(error_msg, exc_info=True)
             self.last_error = error_msg
-            return False
+            return False, ""
 
     def get_networks(self) -> Dict[str, Dict]:
         """Retrieve all Docker networks with their connected containers and stacks.
@@ -531,6 +581,8 @@ class DockerManager:
             self.last_error = error_msg
             return {}
 
+        # Clear any previous error if the operation succeeded
+        self.last_error = None
         return networks
 
     def get_volumes(self) -> Dict[str, Dict]:
@@ -586,6 +638,8 @@ class DockerManager:
             self.last_error = error_msg
             return {}
 
+        # Clear any previous error if the operation succeeded
+        self.last_error = None
         return volumes
 
     def execute_stack_command(
@@ -669,6 +723,8 @@ class DockerManager:
                 thread.daemon = True
                 thread.start()
 
+                # Clear any previous error if the operation succeeded
+                self.last_error = None
                 return True
 
             # For recreate, use subprocess but only if compose file is accessible
@@ -696,6 +752,8 @@ class DockerManager:
                     cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
                 )
 
+                # Clear any previous error if the operation succeeded
+                self.last_error = None
                 # We don't wait for the process to complete to keep the UI responsive
                 return True
 
@@ -731,6 +789,8 @@ class DockerManager:
                     cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
                 )
 
+                # Clear any previous error if the operation succeeded
+                self.last_error = None
                 # We don't wait for the process to complete to keep the UI responsive
                 return True
             else:

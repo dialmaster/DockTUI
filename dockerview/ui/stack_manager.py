@@ -134,10 +134,18 @@ class StackManager:
             "N/A" if container_data["pids"] == "0" else container_data["pids"]
         )
 
+        # Check for status override
+        status = container_data["status"]
+        if (
+            hasattr(self.parent, "_status_overrides")
+            and container_id in self.parent._status_overrides
+        ):
+            status = self.parent._status_overrides[container_id]
+
         row_data = (
             container_data["id"],
             container_data["name"],
-            container_data["status"],
+            status,
             container_data["cpu"],
             container_data["memory"],
             pids_display,

@@ -687,6 +687,30 @@ class ContainerList(ContainerListBase):
         except Exception as e:
             logger.error(f"Error updating status bar: {str(e)}", exc_info=True)
 
+    def clear_status_override(self, container_id: str) -> None:
+        """Clear the status override for a container.
+
+        Args:
+            container_id: The short ID of the container
+        """
+        if (
+            hasattr(self, "_status_overrides")
+            and container_id in self._status_overrides
+        ):
+            del self._status_overrides[container_id]
+
+    def update_container_status(self, container_id: str, status: str) -> None:
+        """Set a status override for a container.
+
+        Args:
+            container_id: The short ID of the container
+            status: The new status to display (e.g., "starting...", "stopping...")
+        """
+        # Store the override status - it will be used during the next refresh
+        if not hasattr(self, "_status_overrides"):
+            self._status_overrides = {}
+        self._status_overrides[container_id] = status
+
     def _restore_selection(self) -> None:
         """Restore the previously selected item after a refresh."""
         try:

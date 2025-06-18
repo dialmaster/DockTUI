@@ -342,12 +342,6 @@ class DockerViewApp(App):
                 # Get checkbox state from the modal instance
                 remove_volumes = modal.checkbox_checked
 
-                # Log the checkbox state for debugging
-                logger = logging.getLogger("dockerview")
-                logger.info(
-                    f"Down command confirmed for stack '{stack_name}', remove_volumes={remove_volumes}"
-                )
-
                 # Build command with volume flag if needed
                 command = "down"
                 if remove_volumes:
@@ -387,8 +381,6 @@ class DockerViewApp(App):
 
         try:
             if item_type == "container":
-                # Execute command on container
-                success = self.docker.execute_container_command(item_id, command)
                 item_name = (
                     self.container_list.selected_container_data.get("name", item_id)
                     if self.container_list.selected_container_data
@@ -400,6 +392,42 @@ class DockerViewApp(App):
                     else f"{command.capitalize()}ing"
                 )
                 message = f"{action_verb} container: {item_name}"
+
+                # Update UI immediately for container operations
+                status_map = {
+                    "start": "starting...",
+                    "stop": "stopping...",
+                    "restart": "restarting...",
+                    "recreate": "recreating...",
+                }
+
+                if command in status_map:
+                    self.container_list.update_container_status(
+                        item_id, status_map[command]
+                    )
+                    self.refresh()
+
+                # Execute command in background thread
+                def execute_and_clear():
+                    success, _ = self.docker.execute_container_command(item_id, command)
+                    if success:
+                        # Clear status override after a delay
+                        self.call_from_thread(
+                            self.set_timer,
+                            3,
+                            lambda: (
+                                self.container_list.clear_status_override(item_id),
+                                self.action_refresh(),
+                            ),
+                        )
+
+                import threading
+
+                thread = threading.Thread(target=execute_and_clear)
+                thread.daemon = True
+                thread.start()
+
+                success = True
             elif item_type == "stack":
                 # Execute command on stack
                 if self.container_list.selected_stack_data:
@@ -444,12 +472,15 @@ class DockerViewApp(App):
                 return
 
             if success:
-                # Show a temporary message in the error display
-                self.error_display.update(message)
+                # For container operations, the status is shown in the container list
+                # For stack operations, we still show the message
+                if item_type == "stack":
+                    # Show a temporary message in the error display
+                    self.error_display.update(message)
+                    # Schedule clearing the message after a few seconds
+                    self.set_timer(3, lambda: self.error_display.update(""))
                 # Schedule a refresh after a short delay to update the UI
                 self.set_timer(2, self.action_refresh)
-                # Schedule clearing the message after a few seconds
-                self.set_timer(3, lambda: self.error_display.update(""))
             else:
                 self.error_display.update(
                     f"Error {command}ing {item_type}: {self.docker.last_error}"
@@ -610,6 +641,11 @@ class DockerViewApp(App):
                     if new_container_id and new_container_data:
                         # Use select_container to properly update the UI and trigger all necessary events
                         self.container_list.select_container(new_container_id)
+                        # Explicitly update the log pane with the new container data
+                        # This ensures the log pane gets the updated container info immediately
+                        self.log_pane.update_selection(
+                            "container", new_container_id, new_container_data
+                        )
 
                 elif self._recreating_item_type == "stack":
                     # For stacks, just trigger a re-selection of the stack
