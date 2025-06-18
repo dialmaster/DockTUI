@@ -7,6 +7,8 @@
       "bump-patch-for-minor-pre-major": true,
       "versioning": "default",
       "include-component-in-tag": false,
+      "include-v-in-tag": true,
+      "release-as": "",
       "changelog-sections": [
         {"type": "feat", "section": "Features", "hidden": false},
         {"type": "fix", "section": "Bug Fixes", "hidden": false},
