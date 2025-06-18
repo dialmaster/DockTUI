@@ -10,7 +10,10 @@ import yaml
 logger = logging.getLogger("dockerview.config")
 
 # Default configuration values
-DEFAULT_CONFIG = {"log": {"max_lines": 2000, "tail": 200, "since": "15m"}}
+DEFAULT_CONFIG = {
+    "app": {"refresh_interval": 5.0},
+    "log": {"max_lines": 2000, "tail": 200, "since": "15m"},
+}
 
 
 class Config:
@@ -53,6 +56,13 @@ class Config:
         default_config_content = """# DockerView Configuration File
 # This file controls various settings for the DockerView application
 
+# Application Settings
+app:
+  # Refresh interval in seconds for updating container status
+  # Lower values update more frequently but use more resources
+  # Default: 5.0
+  refresh_interval: 5.0
+
 # Log Display Settings
 log:
   # Maximum number of log lines to keep in memory per container/stack
@@ -72,6 +82,7 @@ log:
   since: '15m'
 
 # Note: You can also override these settings with environment variables:
+# - DOCKERVIEW_APP_REFRESH_INTERVAL
 # - DOCKERVIEW_LOG_MAX_LINES
 # - DOCKERVIEW_LOG_TAIL
 # - DOCKERVIEW_LOG_SINCE
@@ -141,6 +152,11 @@ log:
                     return int(value)
                 elif value.lower() in ("true", "false"):
                     return value.lower() == "true"
+                elif "." in value:
+                    try:
+                        return float(value)
+                    except ValueError:
+                        pass
             except:
                 pass
             return value
