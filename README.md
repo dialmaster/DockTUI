@@ -68,6 +68,13 @@ The default configuration file contains:
 # DockerView Configuration File
 # This file controls various settings for the DockerView application
 
+# Application Settings
+app:
+  # Refresh interval in seconds for updating container status
+  # Lower values update more frequently but use more resources
+  # Default: 5.0
+  refresh_interval: 5.0
+
 # Log Display Settings
 log:
   # Maximum number of log lines to keep in memory per container/stack
@@ -91,6 +98,9 @@ log:
 
 You can override any configuration value using environment variables:
 
+#### Application Configuration
+- `DOCKERVIEW_APP_REFRESH_INTERVAL` - Override `app.refresh_interval` (refresh rate in seconds)
+
 #### Log Configuration
 - `DOCKERVIEW_LOG_MAX_LINES` - Override `log.max_lines`
 - `DOCKERVIEW_LOG_TAIL` - Override `log.tail`
@@ -102,6 +112,9 @@ You can override any configuration value using environment variables:
 
 Example:
 ```bash
+# Application configuration
+export DOCKERVIEW_APP_REFRESH_INTERVAL=10.0  # Refresh every 10 seconds
+
 # Log configuration
 export DOCKERVIEW_LOG_TAIL=500
 export DOCKERVIEW_LOG_SINCE=1h

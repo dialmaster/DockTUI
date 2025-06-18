@@ -14,6 +14,7 @@ from textual.timer import Timer
 from textual.widgets import Footer, Header, Static
 from textual.worker import Worker
 
+from dockerview.config import config
 from dockerview.docker_mgmt.manager import DockerManager
 from dockerview.ui.containers import ContainerList, SelectionChanged
 from dockerview.ui.dialogs.confirm_modal import ComposeDownModal
@@ -273,8 +274,11 @@ class DockerViewApp(App):
             self.footer = self.query_one("#footer", Footer)
             self.status_bar = self.query_one("#status_bar", StatusBar)
 
-            # Start the auto-refresh timer with a longer interval
-            self.refresh_timer = self.set_interval(5.0, self.action_refresh)
+            # Start the auto-refresh timer with interval from config
+            refresh_interval = config.get("app.refresh_interval", 5.0)
+            self.refresh_timer = self.set_interval(
+                refresh_interval, self.action_refresh
+            )
             # Trigger initial refresh immediately
             self.call_after_refresh(self.action_refresh)
         except Exception as e:
