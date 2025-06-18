@@ -136,6 +136,7 @@ When no logs are found within the configured time range, dockerview will display
 - `t`: Stop selected container or stack
 - `e`: Restart selected container or stack
 - `u`: Recreate selected container or stack (docker compose up -d)
+- `d`: Docker compose down (with confirmation dialog)
 
 ### Log Viewer
 - Click and drag: Select text in log viewer
@@ -151,10 +152,13 @@ When no logs are found within the configured time range, dockerview will display
 - Live resource usage statistics (CPU, Memory, PIDs)
 - Container port mapping display
 - Split-pane log viewer with real-time log streaming
-- Container and stack management (start/stop/restart/recreate)
+- Container and stack management (start/stop/restart/recreate/down)
+- Docker volume management with stack associations
+- Docker network overview and management
 - Log filtering and auto-follow functionality
 - Text selection and clipboard support in log viewer
 - Status bar with detailed selection information
+- Visual feedback for container state transitions
 - Low system resource footprint
 - Cross-platform support (Linux, macOS, Windows)
 - Debug mode with detailed logging
@@ -376,8 +380,14 @@ To create a release:
 
 - `dockerview/`: Main package directory
   - `app.py`: Main application and UI layout
-  - `docker_mgmt/`: Docker integration layer
-  - `ui/`: UI components (containers list, log pane, etc.)
+  - `docker_mgmt/`: Docker SDK integration layer
+  - `ui/`: UI components organized by function:
+    - `base/`: Base classes and interfaces
+    - `managers/`: Resource managers (stacks, networks, volumes)
+    - `viewers/`: Content viewers (log pane)
+    - `dialogs/`: Modal dialogs and confirmations
+    - `widgets/`: Reusable UI components
+  - `utils/`: Utility modules (clipboard, time formatting)
   - `config.py`: Configuration management
 - `tests/`: Unit tests
 - `pyproject.toml`: Poetry configuration and tool settings
