@@ -1,7 +1,7 @@
 """Base container list widget with core functionality."""
 
 import logging
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, Optional, Set, Tuple
 
 from textual.binding import Binding
 from textual.containers import Container, VerticalScroll

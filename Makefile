@@ -6,13 +6,15 @@ help:  ## Show this help message
 install:  ## Install dependencies
 	poetry install
 
-format:  ## Format code with black and isort
-	poetry run black dockerview/
+format:  ## Format code with autoflake, isort, and black
+	poetry run autoflake --remove-all-unused-imports --remove-unused-variables --in-place --recursive dockerview/
 	poetry run isort dockerview/
+	poetry run black dockerview/
 
 lint:  ## Check code formatting without making changes
-	poetry run black --check dockerview/
+	poetry run autoflake --check --remove-all-unused-imports --remove-unused-variables --recursive dockerview/
 	poetry run isort --check-only dockerview/
+	poetry run black --check dockerview/
 
 test:  ## Run tests
 	poetry run pytest -v

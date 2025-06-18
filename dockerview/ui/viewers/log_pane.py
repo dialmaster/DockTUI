@@ -4,17 +4,14 @@ import threading
 from collections import deque
 
 import docker
-from rich.style import Style
 from rich.text import Text
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
-from textual.events import MouseDown, MouseUp
-from textual.message import Message
-from textual.widget import Widget
-from textual.widgets import Checkbox, Input, Label, RichLog, Select, Static, TextArea
+from textual.events import MouseDown
+from textual.widgets import Checkbox, Input, Label, Select, Static, TextArea
 
 from ...config import config
-from ...utils.clipboard import copy_to_clipboard_async, copy_to_clipboard_sync
+from ...utils.clipboard import copy_to_clipboard_async
 
 logger = logging.getLogger("dockerview.log_pane")
 
@@ -626,7 +623,6 @@ class LogPane(Vertical):
             )
 
             line_count = 0
-            has_any_logs = False
 
             for line in log_stream:
                 if self.stop_event.is_set():
@@ -638,7 +634,6 @@ class LogPane(Vertical):
                 line = line.rstrip()
 
                 if line:
-                    has_any_logs = True
                     line_count += 1
                     self.log_queue.put((session_id, "log", line))
 
