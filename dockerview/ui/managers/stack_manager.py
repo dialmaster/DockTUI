@@ -147,6 +147,7 @@ class StackManager:
             container_data["id"],
             container_data["name"],
             status,
+            container_data.get("uptime", "N/A"),
             container_data["cpu"],
             container_data["memory"],
             pids_display,
@@ -328,10 +329,11 @@ class StackManager:
                 "id": table.get_cell_at((row_idx, 0)),
                 "name": table.get_cell_at((row_idx, 1)),
                 "status": table.get_cell_at((row_idx, 2)),
-                "cpu": table.get_cell_at((row_idx, 3)),
-                "memory": table.get_cell_at((row_idx, 4)),
-                "pids": table.get_cell_at((row_idx, 5)),
-                "ports": table.get_cell_at((row_idx, 6)),
+                "uptime": table.get_cell_at((row_idx, 3)),
+                "cpu": table.get_cell_at((row_idx, 4)),
+                "memory": table.get_cell_at((row_idx, 5)),
+                "pids": table.get_cell_at((row_idx, 6)),
+                "ports": table.get_cell_at((row_idx, 7)),
                 "stack": stack_name,
             }
 
