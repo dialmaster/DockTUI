@@ -7,6 +7,7 @@ from rich.text import Text
 from textual.widgets import DataTable
 
 from .base.container_list_base import ContainerListBase, SelectionChanged
+from .managers.image_manager import ImageManager
 from .managers.network_manager import NetworkManager
 from .managers.stack_manager import StackManager
 from .managers.volume_manager import VolumeManager
@@ -26,15 +27,24 @@ class ContainerList(ContainerListBase):
         """Initialize the container list widget with resource managers."""
         super().__init__()
         # Initialize managers
+        self.image_manager = ImageManager(self)
         self.volume_manager = VolumeManager(self)
         self.network_manager = NetworkManager(self)
         self.stack_manager = StackManager(self)
+
+        # Store last data for reference
+        self._last_images_data = {}
 
         # Create references for backward compatibility
         self._setup_backward_compatibility()
 
     def _setup_backward_compatibility(self):
         """Set up references for backward compatibility."""
+        # Image references
+        self.image_headers = self.image_manager.image_headers
+        self.expanded_images = self.image_manager.expanded_images
+        self._images_in_new_data = self.image_manager._images_in_new_data
+
         # Volume references
         self.volume_headers = self.volume_manager.volume_headers
         self.expanded_volumes = self.volume_manager.expanded_volumes
@@ -64,6 +74,7 @@ class ContainerList(ContainerListBase):
         self.stack_manager.clear_tables()
 
         # Reset tracking for new data
+        self.image_manager.reset_tracking()
         self.volume_manager.reset_tracking()
         self.network_manager.reset_tracking()
         self.stack_manager.reset_tracking()
@@ -99,8 +110,9 @@ class ContainerList(ContainerListBase):
             self._is_updating = False
 
     def _cleanup_removed_items(self) -> None:
-        """Remove volumes, networks, and stacks that no longer exist."""
+        """Remove images, volumes, networks, and stacks that no longer exist."""
         # Delegate to managers
+        self.image_manager.cleanup_removed_images()
         self.volume_manager.cleanup_removed_volumes()
         self.network_manager.cleanup_removed_networks()
         self.stack_manager.cleanup_removed_stacks()
@@ -109,6 +121,9 @@ class ContainerList(ContainerListBase):
         """Prepare containers that need to be added to the UI."""
         # Get existing containers from managers
         if not self._pending_clear:
+            self.existing_image_containers = (
+                self.image_manager.get_existing_containers()
+            )
             self.existing_volume_containers = (
                 self.volume_manager.get_existing_containers()
             )
@@ -119,11 +134,13 @@ class ContainerList(ContainerListBase):
                 self.stack_manager.get_existing_containers()
             )
         else:
+            self.existing_image_containers = {}
             self.existing_volume_containers = {}
             self.existing_network_containers = {}
             self.existing_stack_containers = {}
 
         # Prepare new containers using managers
+        self.new_image_containers = self.image_manager.prepare_new_containers()
         self.new_volume_containers = self.volume_manager.prepare_new_containers()
         self.new_network_containers = self.network_manager.prepare_new_containers()
         self.new_stack_containers = self.stack_manager.prepare_new_containers()
@@ -153,6 +170,15 @@ class ContainerList(ContainerListBase):
                 stack_container.mount(header)
                 stack_container.mount(table)
                 table.styles.display = "block" if header.expanded else "none"
+
+        # Mount images section
+        if self._pending_clear or not self.images_section_header.parent:
+            self.mount(self.images_section_header)
+            self.mount(self.images_container)
+            # Set container visibility based on section collapsed state
+            self.images_container.styles.display = (
+                "none" if self.images_section_collapsed else "block"
+            )
 
         # Mount volumes section
         if self.new_volume_containers or self.volume_headers:
@@ -191,6 +217,8 @@ class ContainerList(ContainerListBase):
 
     def _update_existing_sections(self) -> None:
         """Update existing sections and add new items."""
+        # Images are handled by the table, no individual containers to update
+
         # Update existing volumes
         for volume_name, container in self.existing_volume_containers.items():
             if volume_name in self.volume_headers:
@@ -230,9 +258,11 @@ class ContainerList(ContainerListBase):
         self._ensure_section_headers()
 
         # Check what sections need to be mounted
+        images_header_exists = self.images_section_header in self.children
         volumes_header_exists = self.volumes_section_header in self.children
         networks_header_exists = self.networks_section_header in self.children
         stacks_header_exists = self.stacks_section_header in self.children
+        images_container_exists = self.images_container in self.children
         volumes_container_exists = self.volumes_container in self.children
         networks_container_exists = self.networks_container in self.children
         stacks_container_exists = self.stacks_container in self.children
@@ -260,13 +290,56 @@ class ContainerList(ContainerListBase):
                 stack_container.mount(table)
                 table.styles.display = "block" if header.expanded else "none"
 
-        # Mount volumes section if needed
-        if self.new_volume_containers or self.volume_headers:
-            if not volumes_header_exists:
+        # Mount images section if needed
+        if self.new_image_containers or self.image_headers:
+            if not images_header_exists:
                 insert_after = (
                     self.stacks_container
                     if stacks_container_exists
                     else self.stacks_section_header if stacks_header_exists else 0
+                )
+                self.mount(self.images_section_header, after=insert_after)
+            if not images_container_exists:
+                self.mount(self.images_container, after=self.images_section_header)
+
+            # Update container visibility based on section collapsed state
+            if self.images_container:
+                self.images_container.styles.display = (
+                    "none" if self.images_section_collapsed else "block"
+                )
+
+            for image_id, (
+                image_container,
+                header,
+                table,
+            ) in self.new_image_containers.items():
+                self.images_container.mount(image_container)
+                image_container.mount(header)
+                # No table to mount for images
+
+        # Mount volumes section if needed
+        if self.new_volume_containers or self.volume_headers:
+            if not volumes_header_exists:
+                # Recalculate existence after images might have been mounted
+                images_container_exists = self.images_container in self.children
+                images_header_exists = self.images_section_header in self.children
+
+                insert_after = (
+                    self.images_container
+                    if images_container_exists
+                    else (
+                        self.images_section_header
+                        if images_header_exists
+                        else (
+                            self.stacks_container
+                            if stacks_container_exists
+                            else (
+                                self.stacks_section_header
+                                if stacks_header_exists
+                                else 0
+                            )
+                        )
+                    )
                 )
                 self.mount(self.volumes_section_header, after=insert_after)
             if not volumes_container_exists:
@@ -375,6 +448,19 @@ class ContainerList(ContainerListBase):
         self.network_rows.clear()
         self.remove_children()
 
+    def add_image(self, image_data: dict) -> None:
+        """Add or update an image section in the container list.
+
+        Args:
+            image_data: Dictionary containing image information
+        """
+        # Store the image data
+        self._last_images_data[image_data["id"]] = image_data
+
+        self.image_manager.add_image(image_data)
+        # Update selected_image_data reference for backward compatibility
+        self.selected_image_data = self.image_manager.selected_image_data
+
     def add_volume(self, volume_data: dict) -> None:
         """Add or update a volume section in the container list.
 
@@ -481,6 +567,20 @@ class ContainerList(ContainerListBase):
             logger.error(f"Error during ContainerList mount: {str(e)}", exc_info=True)
             raise
 
+    def select_image(self, image_id: str) -> None:
+        """Select an image and update the footer.
+
+        Args:
+            image_id: ID of the image to select
+        """
+        self.image_manager.select_image(image_id)
+        # Update references for backward compatibility
+        self.selected_image_data = self.image_manager.selected_image_data
+        self.selected_volume_data = self.volume_manager.selected_volume_data
+        self.selected_network_data = self.network_manager.selected_network_data
+        self.selected_stack_data = self.stack_manager.selected_stack_data
+        self.selected_container_data = self.stack_manager.selected_container_data
+
     def select_volume(self, volume_name: str) -> None:
         """Select a volume and update the footer.
 
@@ -575,6 +675,40 @@ class ContainerList(ContainerListBase):
                     )
                 else:
                     selection_text.append("None", Style(color="dim", bold=True))
+                status_bar.update(selection_text)
+
+            elif item_type == "image" and self.selected_image_data:
+                image_data = self.selected_image_data
+                selection_text = Text()
+                selection_text.append(
+                    "Current Selection:", Style(color="black", bgcolor="yellow")
+                )
+                selection_text.append("  Image: ", Style(color="white"))
+                # Show first 12 chars of ID
+                selection_text.append(
+                    f"{image_data['id'][:12]}", Style(color="yellow", bold=True)
+                )
+                selection_text.append(" | ", Style(color="white"))
+                selection_text.append(f"Tags: ", Style(color="white"))
+                if image_data["tags"]:
+                    tags_text = ", ".join(image_data["tags"])
+                    if len(tags_text) > 30:
+                        tags_text = tags_text[:27] + "..."
+                    selection_text.append(
+                        f"{tags_text}", Style(color="cyan", bold=True)
+                    )
+                else:
+                    selection_text.append("<none>", Style(color="dim", bold=True))
+                selection_text.append(" | ", Style(color="white"))
+                selection_text.append(f"Size: ", Style(color="white"))
+                selection_text.append(
+                    f"{image_data['size']}", Style(color="blue", bold=True)
+                )
+                selection_text.append(" | ", Style(color="white"))
+                selection_text.append(f"Containers: ", Style(color="white"))
+                selection_text.append(
+                    f"{image_data['containers']}", Style(color="green", bold=True)
+                )
                 status_bar.update(selection_text)
 
             elif item_type == "network" and self.selected_network_data:
@@ -727,7 +861,14 @@ class ContainerList(ContainerListBase):
 
             item_type, item_id = self.selected_item
 
-            if item_type == "volume" and item_id in self.volume_headers:
+            if item_type == "image" and item_id in self.image_manager.image_rows:
+                if self.image_manager.images_table:
+                    self.image_manager.images_table.focus()
+                    row_index = self.image_manager.image_rows[item_id]
+                    self.image_manager.images_table.move_cursor(row=row_index)
+                self._update_footer_with_selection()
+
+            elif item_type == "volume" and item_id in self.volume_headers:
                 header = self.volume_headers[item_id]
                 header.focus()
                 self._update_footer_with_selection()
@@ -784,6 +925,13 @@ class ContainerList(ContainerListBase):
                     header = self.stack_headers[stack_name]
                     header.focus()
 
+            # If an image is selected, focus its header
+            elif self.selected_item and self.selected_item[0] == "image":
+                image_id = self.selected_item[1]
+                if image_id in self.image_headers:
+                    header = self.image_headers[image_id]
+                    header.focus()
+
             # If a volume is selected, focus its header
             elif self.selected_item and self.selected_item[0] == "volume":
                 volume_name = self.selected_item[1]
@@ -816,6 +964,13 @@ class ContainerList(ContainerListBase):
                 self.volumes_container.styles.display = (
                     "none" if header.collapsed else "block"
                 )
+        elif header == self.images_section_header:
+            self.images_section_collapsed = header.collapsed
+            # Toggle visibility of the images container
+            if self.images_container:
+                self.images_container.styles.display = (
+                    "none" if header.collapsed else "block"
+                )
         elif header == self.networks_section_header:
             self.networks_section_collapsed = header.collapsed
             # Toggle visibility of the networks container
@@ -823,6 +978,16 @@ class ContainerList(ContainerListBase):
                 self.networks_container.styles.display = (
                     "none" if header.collapsed else "block"
                 )
+
+    def on_image_header_selected(self, event) -> None:
+        """Handle ImageHeader selection events."""
+        header = event.image_header
+        self.select_image(header.image_id)
+
+    def on_image_header_clicked(self, event) -> None:
+        """Handle ImageHeader click events."""
+        header = event.image_header
+        self.select_image(header.image_id)
 
     def on_volume_header_selected(self, event) -> None:
         """Handle VolumeHeader selection events."""
@@ -858,6 +1023,11 @@ class ContainerList(ContainerListBase):
         """Handle DataTable row selection events."""
         table = event.data_table
         row_key = event.row_key
+
+        # Check if it's the images table
+        if self.image_manager.images_table and table == self.image_manager.images_table:
+            self.image_manager.handle_selection(row_key)
+            return
 
         # Find which stack this table belongs to
         for stack_name, stack_table in self.stack_tables.items():

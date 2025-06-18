@@ -524,37 +524,42 @@ class DockerViewApp(App):
             callback: Function to call with the results when complete
 
         Returns:
-            Tuple[Dict, Dict, Dict, List]: A tuple containing:
+            Tuple[Dict, Dict, Dict, Dict, List]: A tuple containing:
                 - Dict: Mapping of network names to network information
                 - Dict: Mapping of stack names to stack information
+                - Dict: Mapping of image IDs to image information
                 - Dict: Mapping of volume names to volume information
                 - List: List of container information dictionaries
         """
         try:
-            # Get networks, stacks, volumes and containers in the thread
+            # Get networks, stacks, images, volumes and containers in the thread
             networks = self.docker.get_networks()
             stacks = self.docker.get_compose_stacks()
+            images = self.docker.get_images()
             volumes = self.docker.get_volumes()
             containers = self.docker.get_containers()
 
             # Call the callback with the results
             # This will be executed in the main thread after the worker completes
-            self.call_from_thread(callback, networks, stacks, volumes, containers)
+            self.call_from_thread(
+                callback, networks, stacks, images, volumes, containers
+            )
 
-            return networks, stacks, volumes, containers
+            return networks, stacks, images, volumes, containers
         except Exception as e:
             logger.error(f"Error in refresh worker: {str(e)}", exc_info=True)
             self.call_from_thread(
                 self.error_display.update, f"Error refreshing: {str(e)}"
             )
-            return {}, {}, {}, []
+            return {}, {}, {}, {}, []
 
-    def _handle_refresh_results(self, networks, stacks, volumes, containers):
+    def _handle_refresh_results(self, networks, stacks, images, volumes, containers):
         """Handle the results from the refresh worker when they're ready.
 
         Args:
             networks: Dictionary of network information
             stacks: Dictionary of stack information
+            images: Dictionary of image information
             volumes: Dictionary of volume information
             containers: List of container information
         """
@@ -567,19 +572,24 @@ class DockerViewApp(App):
 
             # Schedule the UI update to run asynchronously
             asyncio.create_task(
-                self._update_ui_with_results(networks, stacks, volumes, containers)
+                self._update_ui_with_results(
+                    networks, stacks, images, volumes, containers
+                )
             )
 
         except Exception as e:
             logger.error(f"Error handling refresh results: {str(e)}", exc_info=True)
             self.error_display.update(f"Error refreshing: {str(e)}")
 
-    async def _update_ui_with_results(self, networks, stacks, volumes, containers):
+    async def _update_ui_with_results(
+        self, networks, stacks, images, volumes, containers
+    ):
         """Update the UI with the results from the refresh worker.
 
         Args:
             networks: Dictionary of network information
             stacks: Dictionary of stack information
+            images: Dictionary of image information
             volumes: Dictionary of volume information
             containers: List of container information
         """
@@ -601,7 +611,11 @@ class DockerViewApp(App):
                         stack_info.get("has_compose_file", True),
                     )
 
-                # Process all volumes next
+                # Process all images next
+                for image_id, image_info in images.items():
+                    self.container_list.add_image(image_info)
+
+                # Process all volumes after images
                 for volume_name, volume_info in volumes.items():
                     self.container_list.add_volume(volume_info)
 

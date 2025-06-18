@@ -139,8 +139,8 @@ When no logs are found within the configured time range, dockerview will display
 ## Keyboard Shortcuts
 
 ### Navigation
-- `↑/↓`: Navigate through containers and stacks
-- `←/→`: Collapse/expand stacks
+- `↑/↓`: Navigate through containers, stacks, images, volumes, and networks
+- `←/→` or `Enter`: Collapse/expand sections
 - `Tab`: Switch focus between panes
 - `q`: Quit the application
 
@@ -166,6 +166,7 @@ When no logs are found within the configured time range, dockerview will display
 - Container port mapping display
 - Split-pane log viewer with real-time log streaming
 - Container and stack management (start/stop/restart/recreate/down)
+- Docker images overview with container usage information
 - Docker volume management with stack associations
 - Docker network overview and management
 - Log filtering and auto-follow functionality

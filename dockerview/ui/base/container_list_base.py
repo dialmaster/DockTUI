@@ -39,7 +39,15 @@ class ContainerListBase(VerticalScroll):
         width: 100%;
         height: 3;
     }
-    
+
+    .images-group {
+        layout: vertical;
+        width: 100%;
+        height: auto;
+        margin: 0 0 2 0;
+        background: transparent;
+    }
+
     .volumes-group {
         layout: vertical;
         width: 100%;
@@ -47,7 +55,7 @@ class ContainerListBase(VerticalScroll):
         margin: 0 0 2 0;
         background: transparent;
     }
-    
+
     .stacks-group {
         layout: vertical;
         width: 100%;
@@ -55,7 +63,7 @@ class ContainerListBase(VerticalScroll):
         margin: 0 0 2 0;
         background: transparent;
     }
-    
+
     .networks-group {
         layout: vertical;
         width: 100%;
@@ -63,7 +71,7 @@ class ContainerListBase(VerticalScroll):
         margin: 0;
         background: transparent;
     }
-    
+
     .volume-container {
         layout: vertical;
         width: 100%;
@@ -72,7 +80,7 @@ class ContainerListBase(VerticalScroll):
         background: transparent;
         border: none;
     }
-    
+
     .volume-container VolumeHeader {
         background: $surface;
         border: solid $secondary-darken-3;
@@ -118,6 +126,11 @@ class ContainerListBase(VerticalScroll):
     .stack-container DataTable {
         border: none;
         background: $surface;
+    }
+
+    .images-group DataTable {
+        display: block;
+        height: 20;  /* Fixed height in rows */
     }
 
     /* Make sure the cursor is visible and properly styled */
@@ -166,9 +179,11 @@ class ContainerListBase(VerticalScroll):
         self.expanded_stacks: Set[str] = set()
 
         # Section headers and containers
+        self.images_section_header: Optional[SectionHeader] = None
         self.volumes_section_header: Optional[SectionHeader] = None
         self.networks_section_header: Optional[SectionHeader] = None
         self.stacks_section_header: Optional[SectionHeader] = None
+        self.images_container: Optional[Container] = None
         self.volumes_container: Optional[Container] = None
         self.networks_container: Optional[Container] = None
         self.stacks_container: Optional[Container] = None
@@ -184,6 +199,7 @@ class ContainerListBase(VerticalScroll):
         self.selected_stack_data: Optional[Dict] = None
         self.selected_network_data: Optional[Dict] = None
         self.selected_volume_data: Optional[Dict] = None
+        self.selected_image_data: Optional[Dict] = None
 
         # Track which items exist in current update cycle
         self._volumes_in_new_data: Set[str] = set()
@@ -192,6 +208,7 @@ class ContainerListBase(VerticalScroll):
 
         # Track section collapse states
         self.stacks_section_collapsed = False  # Stacks start expanded
+        self.images_section_collapsed = True  # Images start collapsed
         self.volumes_section_collapsed = True  # Volumes start collapsed
         self.networks_section_collapsed = True  # Networks start collapsed
 
@@ -202,6 +219,11 @@ class ContainerListBase(VerticalScroll):
                 "📦 DOCKER COMPOSE STACKS", collapsed=self.stacks_section_collapsed
             )
             self.stacks_section_header.styles.margin = (0, 0, 0, 0)
+
+        if self.images_section_header is None:
+            self.images_section_header = SectionHeader(
+                "🖼️ DOCKER IMAGES", collapsed=self.images_section_collapsed
+            )
 
         if self.volumes_section_header is None:
             self.volumes_section_header = SectionHeader(
@@ -215,6 +237,10 @@ class ContainerListBase(VerticalScroll):
 
         if self.stacks_container is None:
             self.stacks_container = Container(classes="stacks-group")
+
+        if self.images_container is None:
+            self.images_container = Container(classes="images-group")
+            self.images_container.show_vertical_scrollbar = False
 
         if self.volumes_container is None:
             self.volumes_container = Container(classes="volumes-group")

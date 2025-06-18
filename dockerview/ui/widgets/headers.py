@@ -508,3 +508,140 @@ class StackHeader(Static):
                 container_list.action_toggle_stack()
 
         self._last_click_time = current_time
+
+
+class ImageHeader(Static):
+    """A header widget for displaying Docker image information.
+
+    Displays image ID, tags, creation date, size, and container count.
+    """
+
+    COMPONENT_CLASSES = {"header": "image-header--header"}
+
+    DEFAULT_CSS = """
+    ImageHeader {
+        background: $surface-darken-1;
+        padding: 0 0;
+        height: 3;
+        border-bottom: solid $warning-darken-3;
+        margin: 0 0 0 0;
+        color: $text;
+    }
+
+    ImageHeader:hover {
+        background: $surface-lighten-1;
+        color: $warning-lighten-1;
+        text-style: bold;
+    }
+
+    ImageHeader:focus {
+        background: $surface-lighten-2;
+        color: $warning-lighten-2;
+        text-style: bold;
+    }
+
+    .image-header--header {
+        color: $text;
+        text-style: bold;
+    }
+    """
+
+    class Selected(Message):
+        """Event emitted when the header is selected."""
+
+        def __init__(self, image_header: "ImageHeader") -> None:
+            self.image_header = image_header
+            super().__init__()
+
+    class Clicked(Message):
+        """Event emitted when the header is clicked."""
+
+        def __init__(self, image_header: "ImageHeader") -> None:
+            self.image_header = image_header
+            super().__init__()
+
+    def __init__(
+        self,
+        image_id: str,
+        tags: list,
+        created: str,
+        size: str,
+        containers: int,
+        architecture: str,
+        os: str,
+    ):
+        """Initialize the image header.
+
+        Args:
+            image_id: Docker image ID (short form)
+            tags: List of tags for this image
+            created: Creation timestamp
+            size: Image size (human-readable)
+            containers: Number of containers using this image
+            architecture: Image architecture (e.g., amd64)
+            os: Operating system (e.g., linux)
+        """
+        super().__init__("")
+        self.image_id = image_id
+        self.tags = tags
+        self.created = created
+        self.image_size = size
+        self.containers = containers
+        self.architecture = architecture
+        self.os = os
+        self.can_focus = True
+        self._update_content()
+
+    def _update_content(self) -> None:
+        """Update the header's displayed content based on current state."""
+        # Format tags display
+        if self.tags:
+            # Join tags and truncate if too long
+            tags_text = ", ".join(self.tags)
+            if len(tags_text) > 50:
+                tags_text = tags_text[:47] + "..."
+        else:
+            tags_text = "<none>"
+
+        # Format container count
+        container_text = (
+            f"{self.containers} container{'s' if self.containers != 1 else ''}"
+        )
+        container_style = "green" if self.containers > 0 else "dim"
+
+        content = Text.assemble(
+            Text("  ", style="bold"),  # Indent for visual alignment
+            Text(self.image_id[:12], style="bold yellow"),  # Show first 12 chars of ID
+            " ",
+            Text(tags_text, style="cyan"),
+            "\n",
+            Text("  ", style="white"),  # Indent for visual alignment
+            Text(f"Size: {self.image_size}", style="blue"),
+            " | ",
+            Text(container_text, style=container_style),
+            " | ",
+            Text(f"{self.os}/{self.architecture}", style="dim"),
+        )
+        self.update(content)
+
+    def on_focus(self) -> None:
+        """Called when the header gets focus."""
+        self.refresh()
+        self.post_message(self.Selected(self))
+
+    def on_blur(self) -> None:
+        """Called when the header loses focus."""
+        self.refresh()
+
+    def on_click(self) -> None:
+        """Handle click events."""
+        self.post_message(self.Clicked(self))
+        # Focus the header on click
+        if self.screen and self.screen.focused:
+            focused_widget = self.screen.focused
+            if not (
+                hasattr(focused_widget, "id") and focused_widget.id == "search-input"
+            ):
+                self.focus()
+        else:
+            self.focus()
