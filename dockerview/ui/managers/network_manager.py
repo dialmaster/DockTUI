@@ -6,7 +6,8 @@ from typing import Dict, Optional
 from textual.containers import Container
 from textual.widgets import DataTable
 
-from .headers import NetworkHeader
+from ..base.container_list_base import SelectionChanged
+from ..widgets.headers import NetworkHeader
 
 logger = logging.getLogger("dockerview.network_manager")
 
@@ -186,9 +187,6 @@ class NetworkManager:
             # Update the footer and cursor visibility
             self.parent._update_footer_with_selection()
             self.parent._update_cursor_visibility()
-
-            # Import here to avoid circular import
-            from .container_list_base import SelectionChanged
 
             # Post selection change message
             self.parent.post_message(

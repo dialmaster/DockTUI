@@ -154,6 +154,9 @@ class TestConfig:
                 with patch.dict(os.environ, {'HOME': tmpdir}, clear=True):
                     config = Config()
                     
+                    # Trigger lazy loading by accessing config
+                    _ = config.get("log.max_lines")
+                    
                     # Check that config file was created
                     config_path = Path(tmpdir) / '.config' / 'dockerview' / 'dockerview.yaml'
                     assert config_path.exists()

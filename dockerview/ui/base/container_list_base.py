@@ -8,7 +8,7 @@ from textual.containers import Container, VerticalScroll
 from textual.message import Message
 from textual.widgets import DataTable
 
-from .headers import NetworkHeader, SectionHeader, StackHeader, VolumeHeader
+from ..widgets.headers import NetworkHeader, SectionHeader, StackHeader, VolumeHeader
 
 logger = logging.getLogger("dockerview.container_list")
 

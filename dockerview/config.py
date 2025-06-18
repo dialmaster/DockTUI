@@ -17,9 +17,10 @@ class Config:
     """Configuration manager for DockerView."""
 
     def __init__(self):
-        self.config = DEFAULT_CONFIG.copy()
-        self.config_file = None
-        self._load_config()
+        self._config = None
+        self._config_file = None
+        self._loaded = False
+        self._loading = False
 
     def _get_config_path(self) -> Path:
         """Get the configuration file path."""
@@ -84,15 +85,15 @@ log:
     def _load_config(self):
         """Load configuration from file."""
         try:
-            self.config_file = self._get_config_path()
+            self._config_file = self._get_config_path()
 
             if self.config_file.exists():
                 with open(self.config_file, "r") as f:
                     loaded_config = yaml.safe_load(f) or {}
 
                 # Merge with defaults
-                self._merge_config(self.config, loaded_config)
-                logger.info(f"Loaded configuration from {self.config_file}")
+                self._merge_config(self._config, loaded_config)
+                logger.info(f"Loaded configuration from {self._config_file}")
         except Exception as e:
             logger.warning(f"Failed to load config file, using defaults: {e}")
 
@@ -104,8 +105,32 @@ log:
             else:
                 base[key] = value
 
+    def _ensure_loaded(self):
+        """Ensure configuration is loaded (lazy loading)."""
+        if not self._loaded and not self._loading:
+            self._loading = True
+            try:
+                self._config = DEFAULT_CONFIG.copy()
+                self._load_config()
+                self._loaded = True
+            finally:
+                self._loading = False
+
+    @property
+    def config(self):
+        """Get the configuration dictionary, loading it if needed."""
+        self._ensure_loaded()
+        return self._config
+
+    @property
+    def config_file(self):
+        """Get the configuration file path."""
+        self._ensure_loaded()
+        return self._config_file
+
     def get(self, key: str, default: Any = None) -> Any:
         """Get a configuration value using dot notation (e.g., 'log.max_lines')."""
+        self._ensure_loaded()
         # Check environment variable override first
         env_key = f"DOCKERVIEW_{key.upper().replace('.', '_')}"
         if env_key in os.environ:
@@ -122,7 +147,7 @@ log:
 
         # Navigate through nested config
         keys = key.split(".")
-        value = self.config
+        value = self._config
 
         for k in keys:
             if isinstance(value, dict) and k in value:
@@ -134,8 +159,9 @@ log:
 
     def get_config_info(self) -> str:
         """Get information about the current configuration."""
-        return f"Config file: {self.config_file or 'Using defaults'}"
+        self._ensure_loaded()
+        return f"Config file: {self._config_file or 'Using defaults'}"
 
 
-# Global config instance
+# Global config instance - lazy loaded
 config = Config()

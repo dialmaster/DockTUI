@@ -6,7 +6,8 @@ from typing import Dict, Optional, Tuple
 from textual.containers import Container
 from textual.widgets import DataTable
 
-from .headers import StackHeader
+from ..base.container_list_base import SelectionChanged
+from ..widgets.headers import StackHeader
 
 logger = logging.getLogger("dockerview.stack_manager")
 
@@ -300,9 +301,6 @@ class StackManager:
             self.parent._update_footer_with_selection()
             self.parent._update_cursor_visibility()
 
-            # Import here to avoid circular import
-            from .container_list_base import SelectionChanged
-
             # Post selection change message
             self.parent.post_message(
                 SelectionChanged("stack", stack_name, self.selected_stack_data)
@@ -373,9 +371,6 @@ class StackManager:
 
             # Update the footer with selection
             self.parent._update_footer_with_selection()
-
-            # Import here to avoid circular import
-            from .container_list_base import SelectionChanged
 
             # Post selection change message
             self.parent.post_message(

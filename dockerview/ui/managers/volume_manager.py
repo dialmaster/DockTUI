@@ -5,7 +5,8 @@ from typing import Dict, Optional
 
 from textual.containers import Container
 
-from .headers import VolumeHeader
+from ..base.container_list_base import SelectionChanged
+from ..widgets.headers import VolumeHeader
 
 logger = logging.getLogger("dockerview.volume_manager")
 
@@ -132,9 +133,6 @@ class VolumeManager:
             # Update the footer and cursor visibility
             self.parent._update_footer_with_selection()
             self.parent._update_cursor_visibility()
-
-            # Import here to avoid circular import
-            from .container_list_base import SelectionChanged
 
             # Post selection change message
             self.parent.post_message(

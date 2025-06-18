@@ -15,9 +15,9 @@ from textual.widgets import Footer, Header, Static
 from textual.worker import Worker, get_current_worker
 
 from dockerview.docker_mgmt.manager import DockerManager
-from dockerview.ui.confirm_modal import ComposeDownModal
 from dockerview.ui.containers import ContainerList, SelectionChanged
-from dockerview.ui.log_pane import LogPane
+from dockerview.ui.dialogs.confirm_modal import ComposeDownModal
+from dockerview.ui.viewers.log_pane import LogPane
 
 
 def setup_logging():

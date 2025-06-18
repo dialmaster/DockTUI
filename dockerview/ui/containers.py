@@ -8,11 +8,11 @@ from rich.text import Text
 from textual.containers import Container
 from textual.widgets import DataTable
 
-from .container_list_base import ContainerListBase, SelectionChanged
-from .headers import NetworkHeader, StackHeader, VolumeHeader
-from .network_manager import NetworkManager
-from .stack_manager import StackManager
-from .volume_manager import VolumeManager
+from .base.container_list_base import ContainerListBase, SelectionChanged
+from .managers.network_manager import NetworkManager
+from .managers.stack_manager import StackManager
+from .managers.volume_manager import VolumeManager
+from .widgets.headers import NetworkHeader, StackHeader, VolumeHeader
 
 logger = logging.getLogger("dockerview.containers")
 

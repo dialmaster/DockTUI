@@ -13,8 +13,8 @@ from textual.message import Message
 from textual.widget import Widget
 from textual.widgets import Checkbox, Input, Label, RichLog, Select, Static, TextArea
 
-from ..config import config
-from ..utils.clipboard import copy_to_clipboard_async, copy_to_clipboard_sync
+from ...config import config
+from ...utils.clipboard import copy_to_clipboard_async, copy_to_clipboard_sync
 
 logger = logging.getLogger("dockerview.log_pane")
 
