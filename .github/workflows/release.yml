@@ -1,0 +1,28 @@
+name: Manual Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_branch:
+        description: 'Branch to release from'
+        default: 'main'
+        required: true
+        type: string
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write      # needed for tag + release
+      pull-requests: write # needed for release PR
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.target_branch }}
+
+      - name: Release Please
+        id: rp
+        uses: googleapis/release-please-action@v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

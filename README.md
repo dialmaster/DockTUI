@@ -357,6 +357,20 @@ All checks must pass before merging pull requests.
 3. **Imports**: Organized with isort using the black profile
 4. **Pre-commit hooks**: Automatically run formatting and checks on commit
 5. **Testing**: Add tests for new features and ensure existing tests pass
+6. **Commit messages**: Follow [Conventional Commits](https://www.conventionalcommits.org/) format:
+   - `feat:` for new features
+   - `fix:` for bug fixes
+   - `docs:`, `style:`, `refactor:`, `test:`, `chore:` for other changes
+
+### Releases
+
+dockerview uses [release-please](https://github.com/googleapis/release-please) for automated versioning and releases. The project follows [Semantic Versioning](https://semver.org/).
+
+To create a release:
+1. Navigate to Actions → Manual Release
+2. Click "Run workflow" and select the branch (default: main)
+3. Review and merge the generated release PR
+4. Run the workflow again to create the GitHub release
 
 ### Project Structure
 
