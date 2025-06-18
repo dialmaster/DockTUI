@@ -1,11 +1,9 @@
 """Main container list widget implementation."""
 
 import logging
-from typing import Optional
 
 from rich.style import Style
 from rich.text import Text
-from textual.containers import Container
 from textual.widgets import DataTable
 
 from .base.container_list_base import ContainerListBase, SelectionChanged

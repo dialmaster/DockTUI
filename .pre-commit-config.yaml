@@ -1,9 +1,33 @@
 repos:
+  # autoflake - remove unused imports and variables
+  - repo: https://github.com/PyCQA/autoflake
+    rev: v2.3.1
+    hooks:
+      - id: autoflake
+        args: [--remove-all-unused-imports, --remove-unused-variables, --in-place]
+        files: ^dockerview/.*\.py$
+
+  # isort - sort imports
+  - repo: https://github.com/PyCQA/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        args: ["--profile", "black"]
+        files: ^dockerview/.*\.py$
+
+  # black - code formatter
+  - repo: https://github.com/psf/black
+    rev: 24.1.1
+    hooks:
+      - id: black
+        files: ^dockerview/.*\.py$
+
+  # Run tests
   - repo: local
     hooks:
-      - id: make-check
-        name: Run make check
-        entry: make check
+      - id: pytest
+        name: Run tests
+        entry: pytest -v
         language: system
         pass_filenames: false
         always_run: true

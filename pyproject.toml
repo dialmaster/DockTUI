@@ -17,6 +17,7 @@ pyyaml = "^6.0.1"
 pytest = "^8.0.0"
 black = "^24.1.1"
 isort = "^5.13.2"
+autoflake = "^2.3.1"
 poethepoet = "^0.24.4"
 pre-commit = ">=2.9.2,<3.0"
 
@@ -36,6 +37,12 @@ include = '\.pyi?$'
 profile = "black"
 line_length = 88
 
+[tool.autoflake]
+remove-all-unused-imports = true
+remove-unused-variables = true
+remove-duplicate-keys = true
+ignore-init-module-imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
@@ -43,12 +50,14 @@ addopts = "-v --tb=short"
 
 [tool.poe.tasks]
 format = [
-    {cmd = "black dockerview/"},
-    {cmd = "isort dockerview/"}
+    {cmd = "autoflake --remove-all-unused-imports --remove-unused-variables --in-place --recursive dockerview/"},
+    {cmd = "isort dockerview/"},
+    {cmd = "black dockerview/"}
 ]
 lint = [
-    {cmd = "black --check dockerview/"},
-    {cmd = "isort --check-only dockerview/"}
+    {cmd = "autoflake --check --remove-all-unused-imports --remove-unused-variables --recursive dockerview/"},
+    {cmd = "isort --check-only dockerview/"},
+    {cmd = "black --check dockerview/"}
 ]
 test = "pytest -v"
 check = ["lint", "test"]

@@ -12,7 +12,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.timer import Timer
 from textual.widgets import Footer, Header, Static
-from textual.worker import Worker, get_current_worker
+from textual.worker import Worker
 
 from dockerview.docker_mgmt.manager import DockerManager
 from dockerview.ui.containers import ContainerList, SelectionChanged
@@ -121,7 +121,6 @@ class StatusBar(Static):
         Args:
             message: The message to display in the status bar (string or Rich Text object)
         """
-        from rich.console import RenderableType
 
         super().update(message)
 
