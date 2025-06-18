@@ -253,7 +253,9 @@ class ContainerListBase(VerticalScroll):
             DataTable: A configured table for displaying container information
         """
         table = DataTable()
-        table.add_columns("ID", "Name", "Status", "CPU %", "Memory", "PIDs", "Ports")
+        table.add_columns(
+            "ID", "Name", "Status", "Uptime", "CPU %", "Memory", "PIDs", "Ports"
+        )
 
         # Configure cursor behavior
         table.cursor_type = "row"

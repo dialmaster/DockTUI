@@ -8,6 +8,8 @@ from typing import Dict, List, Tuple
 
 import docker
 
+from ..utils.time_utils import format_uptime
+
 logger = logging.getLogger("dockerview.docker_mgmt")
 
 
@@ -304,10 +306,22 @@ class DockerManager:
                                 container.short_id, container.status
                             )
 
+                        start_time = None
+                        try:
+                            if hasattr(container, "attrs") and container.attrs:
+                                state = container.attrs.get("State", {})
+                                if state.get("Running", False):
+                                    start_time = state.get("StartedAt")
+                        except Exception as e:
+                            logger.debug(
+                                f"Could not get start time for container {container.name}: {e}"
+                            )
+
                         container_info = {
                             "id": container.short_id,
                             "name": container.name,
                             "status": status,
+                            "uptime": format_uptime(start_time),
                             "cpu": stats["cpu"],
                             "memory": stats["memory"],
                             "pids": stats["pids"],
