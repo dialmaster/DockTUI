@@ -15,6 +15,7 @@ jobs:
     permissions:
       contents: write      # needed for tag + release
       pull-requests: write # needed for release PR
+      issues: write        # needed for PR labels
     steps:
       - uses: actions/checkout@v4
         with:
