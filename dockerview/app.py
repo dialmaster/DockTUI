@@ -16,7 +16,8 @@ from textual.worker import Worker, get_current_worker
 
 from dockerview.docker_mgmt.manager import DockerManager
 from dockerview.ui.containers import ContainerList, SelectionChanged
-from dockerview.ui.log_pane import LogPane
+from dockerview.ui.dialogs.confirm_modal import ComposeDownModal
+from dockerview.ui.viewers.log_pane import LogPane
 
 
 def setup_logging():
@@ -208,6 +209,7 @@ class DockerViewApp(App):
         Binding("t", "stop", "Stop Selected"),
         Binding("e", "restart", "Restart Selected"),
         Binding("u", "recreate", "Recreate Selected (Up)"),
+        Binding("d", "down", "Down Selected Stack"),
     ]
 
     def __init__(self):
@@ -310,6 +312,45 @@ class DockerViewApp(App):
         """Recreate the selected container or stack using docker compose up -d."""
         self._execute_docker_command("recreate")
 
+    def action_down(self) -> None:
+        """Take down the selected stack with confirmation dialog."""
+        if not self.container_list or not self.container_list.selected_item:
+            self.error_display.update("No item selected to take down")
+            return
+
+        item_type, item_id = self.container_list.selected_item
+
+        # Only allow down command on stacks, not individual containers
+        if item_type != "stack":
+            self.error_display.update(
+                "Down command only works on stacks, not individual containers"
+            )
+            return
+
+        # Get stack name for the modal
+        stack_name = "unknown"
+        if self.container_list.selected_stack_data:
+            stack_name = self.container_list.selected_stack_data.get("name", "unknown")
+
+        # Create the modal
+        modal = ComposeDownModal(stack_name)
+
+        # Push the confirmation modal
+        def handle_down_confirmation(confirmed: bool) -> None:
+            """Handle the result from the confirmation modal."""
+            if confirmed:
+                # Get checkbox state from the modal instance
+                remove_volumes = modal.checkbox_checked
+
+                # Build command with volume flag if needed
+                command = "down"
+                if remove_volumes:
+                    command = "down:remove_volumes"
+
+                self._execute_docker_command(command)
+
+        self.push_screen(modal, handle_down_confirmation)
+
     def _execute_docker_command(self, command: str) -> None:
         """Execute a Docker command on the selected item.
 
@@ -340,8 +381,6 @@ class DockerViewApp(App):
 
         try:
             if item_type == "container":
-                # Execute command on container
-                success = self.docker.execute_container_command(item_id, command)
                 item_name = (
                     self.container_list.selected_container_data.get("name", item_id)
                     if self.container_list.selected_container_data
@@ -353,6 +392,42 @@ class DockerViewApp(App):
                     else f"{command.capitalize()}ing"
                 )
                 message = f"{action_verb} container: {item_name}"
+
+                # Update UI immediately for container operations
+                status_map = {
+                    "start": "starting...",
+                    "stop": "stopping...",
+                    "restart": "restarting...",
+                    "recreate": "recreating...",
+                }
+
+                if command in status_map:
+                    self.container_list.update_container_status(
+                        item_id, status_map[command]
+                    )
+                    self.refresh()
+
+                # Execute command in background thread
+                def execute_and_clear():
+                    success, _ = self.docker.execute_container_command(item_id, command)
+                    if success:
+                        # Clear status override after a delay
+                        self.call_from_thread(
+                            self.set_timer,
+                            3,
+                            lambda: (
+                                self.container_list.clear_status_override(item_id),
+                                self.action_refresh(),
+                            ),
+                        )
+
+                import threading
+
+                thread = threading.Thread(target=execute_and_clear)
+                thread.daemon = True
+                thread.start()
+
+                success = True
             elif item_type == "stack":
                 # Execute command on stack
                 if self.container_list.selected_stack_data:
@@ -362,15 +437,33 @@ class DockerViewApp(App):
                     config_file = self.container_list.selected_stack_data.get(
                         "config_file", ""
                     )
+
+                    # Check if recreate is allowed
+                    if command == "recreate":
+                        can_recreate = self.container_list.selected_stack_data.get(
+                            "can_recreate", True
+                        )
+                        if not can_recreate:
+                            self.error_display.update(
+                                f"Cannot recreate stack '{stack_name}': compose file not accessible"
+                            )
+                            return
+
                     success = self.docker.execute_stack_command(
                         stack_name, config_file, command
                     )
-                    action_verb = (
-                        "Recreating"
-                        if command == "recreate"
-                        else f"{command.capitalize()}ing"
-                    )
-                    message = f"{action_verb} stack: {stack_name}"
+                    if command.startswith("down"):
+                        action_verb = "Taking down"
+                        message = f"{action_verb} stack: {stack_name}"
+                        if "remove_volumes" in command:
+                            message += " (including volumes)"
+                    else:
+                        action_verb = (
+                            "Recreating"
+                            if command == "recreate"
+                            else f"{command.capitalize()}ing"
+                        )
+                        message = f"{action_verb} stack: {stack_name}"
                 else:
                     self.error_display.update(f"Missing stack data for {item_id}")
                     return
@@ -379,12 +472,15 @@ class DockerViewApp(App):
                 return
 
             if success:
-                # Show a temporary message in the error display
-                self.error_display.update(message)
+                # For container operations, the status is shown in the container list
+                # For stack operations, we still show the message
+                if item_type == "stack":
+                    # Show a temporary message in the error display
+                    self.error_display.update(message)
+                    # Schedule clearing the message after a few seconds
+                    self.set_timer(3, lambda: self.error_display.update(""))
                 # Schedule a refresh after a short delay to update the UI
                 self.set_timer(2, self.action_refresh)
-                # Schedule clearing the message after a few seconds
-                self.set_timer(3, lambda: self.error_display.update(""))
             else:
                 self.error_display.update(
                     f"Error {command}ing {item_type}: {self.docker.last_error}"
@@ -418,42 +514,45 @@ class DockerViewApp(App):
             self.error_display.update(f"Error refreshing: {str(e)}")
 
     @work(thread=True)
-    def _refresh_containers_worker(self, callback) -> Tuple[Dict, Dict, List]:
-        """Worker function to fetch network, stack, and container data in a background thread.
+    def _refresh_containers_worker(self, callback) -> Tuple[Dict, Dict, Dict, List]:
+        """Worker function to fetch network, stack, volume and container data in a background thread.
 
         Args:
             callback: Function to call with the results when complete
 
         Returns:
-            Tuple[Dict, Dict, List]: A tuple containing:
+            Tuple[Dict, Dict, Dict, List]: A tuple containing:
                 - Dict: Mapping of network names to network information
                 - Dict: Mapping of stack names to stack information
+                - Dict: Mapping of volume names to volume information
                 - List: List of container information dictionaries
         """
         try:
-            # Get networks, stacks and containers in the thread
+            # Get networks, stacks, volumes and containers in the thread
             networks = self.docker.get_networks()
             stacks = self.docker.get_compose_stacks()
+            volumes = self.docker.get_volumes()
             containers = self.docker.get_containers()
 
             # Call the callback with the results
             # This will be executed in the main thread after the worker completes
-            self.call_from_thread(callback, networks, stacks, containers)
+            self.call_from_thread(callback, networks, stacks, volumes, containers)
 
-            return networks, stacks, containers
+            return networks, stacks, volumes, containers
         except Exception as e:
             logger.error(f"Error in refresh worker: {str(e)}", exc_info=True)
             self.call_from_thread(
                 self.error_display.update, f"Error refreshing: {str(e)}"
             )
-            return {}, {}, []
+            return {}, {}, {}, []
 
-    def _handle_refresh_results(self, networks, stacks, containers):
+    def _handle_refresh_results(self, networks, stacks, volumes, containers):
         """Handle the results from the refresh worker when they're ready.
 
         Args:
             networks: Dictionary of network information
             stacks: Dictionary of stack information
+            volumes: Dictionary of volume information
             containers: List of container information
         """
         try:
@@ -465,19 +564,20 @@ class DockerViewApp(App):
 
             # Schedule the UI update to run asynchronously
             asyncio.create_task(
-                self._update_ui_with_results(networks, stacks, containers)
+                self._update_ui_with_results(networks, stacks, volumes, containers)
             )
 
         except Exception as e:
             logger.error(f"Error handling refresh results: {str(e)}", exc_info=True)
             self.error_display.update(f"Error refreshing: {str(e)}")
 
-    async def _update_ui_with_results(self, networks, stacks, containers):
+    async def _update_ui_with_results(self, networks, stacks, volumes, containers):
         """Update the UI with the results from the refresh worker.
 
         Args:
             networks: Dictionary of network information
             stacks: Dictionary of stack information
+            volumes: Dictionary of volume information
             containers: List of container information
         """
 
@@ -486,7 +586,23 @@ class DockerViewApp(App):
             self.container_list.begin_update()
 
             try:
-                # Process all networks first
+                # Process all stacks first
+                for stack_name, stack_info in stacks.items():
+                    self.container_list.add_stack(
+                        stack_name,
+                        stack_info["config_file"],
+                        stack_info["running"],
+                        stack_info["exited"],
+                        stack_info["total"],
+                        stack_info.get("can_recreate", True),
+                        stack_info.get("has_compose_file", True),
+                    )
+
+                # Process all volumes next
+                for volume_name, volume_info in volumes.items():
+                    self.container_list.add_volume(volume_info)
+
+                # Process all networks after volumes
                 for network_name, network_info in networks.items():
                     self.container_list.add_network(network_info)
 
@@ -495,16 +611,6 @@ class DockerViewApp(App):
                         self.container_list.add_container_to_network(
                             network_name, container_info
                         )
-
-                # Process all stacks next
-                for stack_name, stack_info in stacks.items():
-                    self.container_list.add_stack(
-                        stack_name,
-                        stack_info["config_file"],
-                        stack_info["running"],
-                        stack_info["exited"],
-                        stack_info["total"],
-                    )
 
                 # Process all containers in a single batch
                 # Sort containers by stack to minimize UI updates
@@ -535,6 +641,11 @@ class DockerViewApp(App):
                     if new_container_id and new_container_data:
                         # Use select_container to properly update the UI and trigger all necessary events
                         self.container_list.select_container(new_container_id)
+                        # Explicitly update the log pane with the new container data
+                        # This ensures the log pane gets the updated container info immediately
+                        self.log_pane.update_selection(
+                            "container", new_container_id, new_container_data
+                        )
 
                 elif self._recreating_item_type == "stack":
                     # For stacks, just trigger a re-selection of the stack

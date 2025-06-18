@@ -1,8 +1,5 @@
 import logging
-import os
-import platform
 import queue
-import subprocess
 import threading
 from collections import deque
 
@@ -16,77 +13,10 @@ from textual.message import Message
 from textual.widget import Widget
 from textual.widgets import Checkbox, Input, Label, RichLog, Select, Static, TextArea
 
-from ..config import config
+from ...config import config
+from ...utils.clipboard import copy_to_clipboard_async, copy_to_clipboard_sync
 
 logger = logging.getLogger("dockerview.log_pane")
-
-
-def copy_to_clipboard_sync(text):
-    """Copy text to clipboard synchronously, with WSL2 support."""
-    try:
-        # Try using pyperclip first
-        import pyperclip
-
-        pyperclip.copy(text)
-        return True
-    except Exception as e:
-        pass  # pyperclip not available, try fallbacks
-
-    # Fallback for WSL2
-    try:
-        # Check if we're in WSL
-        if "microsoft" in platform.uname().release.lower() or "WSL" in os.environ.get(
-            "WSL_DISTRO_NAME", ""
-        ):
-            # Use PowerShell through WSL interop
-            process = subprocess.Popen(
-                ["powershell.exe", "-command", "Set-Clipboard"],
-                stdin=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                text=True,
-            )
-            process.communicate(input=text, timeout=2.0)  # 2 second timeout
-            return process.returncode == 0
-    except subprocess.TimeoutExpired:
-        return False
-    except Exception as e:
-        pass  # WSL clipboard fallback failed
-
-    # Try xclip as another fallback
-    try:
-        process = subprocess.Popen(
-            ["xclip", "-selection", "clipboard"],
-            stdin=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            text=True,
-        )
-        process.communicate(input=text, timeout=1.0)  # 1 second timeout
-        return process.returncode == 0
-    except subprocess.TimeoutExpired:
-        return False
-    except Exception as e:
-        pass  # xclip failed
-
-    return False
-
-
-def copy_to_clipboard_async(text, callback=None):
-    """Copy text to clipboard in a background thread.
-
-    Args:
-        text: Text to copy
-        callback: Optional callback function that receives (success: bool)
-    """
-
-    def _copy_thread():
-        success = copy_to_clipboard_sync(text)
-        if callback:
-            callback(success)
-
-    thread = threading.Thread(target=_copy_thread, daemon=True)
-    thread.start()
 
 
 class LogTextArea(TextArea):
@@ -94,7 +24,6 @@ class LogTextArea(TextArea):
 
     def on_mouse_down(self, event: MouseDown) -> None:
         """Handle mouse down events for right-click copy."""
-        # Check if it's a right-click (button 3)
         if event.button == 3:
             # Check if there's selected text
             selection = self.selected_text
@@ -114,9 +43,10 @@ class LogTextArea(TextArea):
                         )
                     else:
                         logger.error("Failed to copy to clipboard")
+                        # Show error notification from main thread
                         self.app.call_from_thread(
                             self.app.notify,
-                            "Copy failed - clipboard not available",
+                            "Failed to copy to clipboard. Please install xclip or pyperclip.",
                             severity="error",
                             timeout=3,
                         )
@@ -277,21 +207,22 @@ class LogPane(Vertical):
         # Track if we've received any logs yet
         self.initial_log_check_done = False
         self.waiting_for_logs = False
+        self.showing_no_logs_message = (
+            False  # Track when we're showing the "no logs found" message
+        )
 
         # Docker client for SDK streaming
         try:
             self.docker_client = docker.from_env()
         except Exception as e:
-            logger.warning(
-                f"Failed to initialize Docker client, falling back to CLI: {e}"
-            )
+            logger.error(f"Failed to initialize Docker client: {e}")
             self.docker_client = None
 
         # Threading for log streaming
         self.log_thread = None
         self.log_queue = queue.Queue()
         self.stop_event = threading.Event()
-        self.process = None
+        self.log_session_id = 0  # Track log sessions to prevent mixing old/new logs
 
         # UI components
         self.header = None
@@ -460,9 +391,6 @@ class LogPane(Vertical):
                     return
             return
 
-        # Stop any existing log streaming
-        self._stop_logs()
-
         # Update state
         self.current_item = (item_type, item_id)
         self.current_item_data = item_data
@@ -498,20 +426,25 @@ class LogPane(Vertical):
         self.log_display.clear()
         self.all_log_lines.clear()  # Clear the deque
         self.filtered_line_count = 0
+        self.showing_no_logs_message = False  # Reset when clearing logs
 
-        # Check if this is a container and if it's not running
+        # Check if this is a container and if it's not running - do this BEFORE stopping logs
         if item_type == "container" and item_data.get("status"):
             status = item_data["status"].lower()
             if "exited" in status or "stopped" in status or "created" in status:
-                # Container is not running, show appropriate message
+                # Container is not running, show appropriate message immediately
                 self.log_display.text = f"Container '{item_data.get('name', item_id)}' is not running.\nStatus: {item_data['status']}"
-                self.refresh()
+                # Stop any existing log streaming (non-blocking)
+                self._stop_logs_async()
                 return
 
-        # Refresh to ensure visibility changes take effect
-        self.refresh()
+        # Show loading message immediately
+        self.log_display.text = f"Loading logs for {item_type}: {item_id}...\n"
 
-        # Start streaming logs
+        # Stop any existing log streaming asynchronously to avoid blocking
+        self._stop_logs_async()
+
+        # Start streaming logs without refresh to avoid blocking
         self._start_logs()
 
     def clear_selection(self):
@@ -554,6 +487,7 @@ class LogPane(Vertical):
         self.log_display.clear()
         self.all_log_lines.clear()  # Clear the deque
         self.filtered_line_count = 0
+        self.showing_no_logs_message = False  # Reset when status changes
 
         status = item_data.get("status", "").lower()
 
@@ -563,8 +497,8 @@ class LogPane(Vertical):
             self.refresh()
         elif "running" in status or "up" in status:
             # Container is running, start streaming logs
+            self.log_display.clear()
             self.log_display.text = f"Container '{item_data.get('name', self.current_item[1])}' started. Loading logs...\n"
-            self.refresh()
             self._start_logs()
 
     def _start_logs(self):
@@ -575,86 +509,19 @@ class LogPane(Vertical):
 
         item_type, item_id = self.current_item
 
-        # Build Docker command with performance optimizations
-        if item_type == "container":
-            docker_cmd = [
-                "docker",
-                "logs",
-                "-f",
-                f"--tail={self.LOG_TAIL}",
-                f"--since={self.LOG_SINCE}",
-                item_id,
-            ]
-        elif item_type == "stack":
-            # Try to use compose file if available
-            config_file = self.current_item_data.get("config_file", "")
-            stack_name = self.current_item_data.get("name", item_id)
+        # Increment session ID to distinguish this log stream from previous ones
+        self.log_session_id += 1
+        current_session_id = self.log_session_id
 
-            if config_file and config_file != "N/A":
-                # Extract directory from config file path to run command from correct location
-                import os
-
-                config_dir = os.path.dirname(config_file)
-                config_filename = os.path.basename(config_file)
-
-                if config_dir:
-                    # Store the working directory for the subprocess
-                    self.working_directory = config_dir
-                    docker_cmd = [
-                        "docker",
-                        "compose",
-                        "-f",
-                        config_file,
-                        "logs",
-                        "--no-color",
-                        "--no-log-prefix",
-                        f"--tail={self.LOG_TAIL}",
-                        f"--since={self.LOG_SINCE}",
-                        "-f",
-                    ]
-                else:
-                    # Config file is in current directory
-                    self.working_directory = None
-                    docker_cmd = [
-                        "docker",
-                        "compose",
-                        "-f",
-                        config_file,
-                        "logs",
-                        "--no-color",
-                        "--no-log-prefix",
-                        f"--tail={self.LOG_TAIL}",
-                        f"--since={self.LOG_SINCE}",
-                        "-f",
-                    ]
-            else:
-                # Fallback to using project name
-                self.working_directory = None
-                docker_cmd = [
-                    "docker",
-                    "compose",
-                    "-p",
-                    stack_name,
-                    "logs",
-                    "--no-color",
-                    "--no-log-prefix",
-                    f"--tail={self.LOG_TAIL}",
-                    f"--since={self.LOG_SINCE}",
-                    "-f",
-                ]
-        else:
-            logger.error(f"Unknown item type: {item_type}")
-            return
-
-        # Add a loading message
-        self.log_display.text = f"Loading logs for {item_type}: {item_id}...\n"
+        # Note: Loading message is already shown in update_selection()
         self.waiting_for_logs = True
         self.initial_log_check_done = False
+        self.showing_no_logs_message = False  # Reset the flag when starting new logs
 
-        # Start the log worker thread
+        # Clear stop event for the new thread
         self.stop_event.clear()
         self.log_thread = threading.Thread(
-            target=self._log_worker, args=(docker_cmd,), daemon=True
+            target=self._log_worker, args=(current_session_id,), daemon=True
         )
         self.log_thread.start()
 
@@ -663,18 +530,6 @@ class LogPane(Vertical):
 
         # Signal the thread to stop
         self.stop_event.set()
-
-        # Terminate the process if it exists
-        if self.process:
-            try:
-                self.process.terminate()
-                self.process.wait(timeout=1)
-            except subprocess.TimeoutExpired:
-                self.process.kill()
-            except Exception as e:
-                logger.error(f"Error terminating process: {e}")
-            finally:
-                self.process = None
 
         # Wait for the thread to finish
         if self.log_thread and self.log_thread.is_alive():
@@ -687,83 +542,79 @@ class LogPane(Vertical):
             except queue.Empty:
                 break
 
-    def _log_worker(self, docker_cmd):
-        """Worker thread that reads Docker logs and puts them in the queue."""
-        # Check if we should use Docker SDK streaming for containers
+    def _stop_logs_async(self):
+        """Stop the current log streaming without blocking."""
+        # Signal the thread to stop
+        self.stop_event.set()
+
+        # Clear the queue without waiting for thread
+        while not self.log_queue.empty():
+            try:
+                self.log_queue.get_nowait()
+            except queue.Empty:
+                break
+
+    def _log_worker(self, session_id):
+        """Worker thread that reads Docker logs and puts them in the queue.
+
+        Args:
+            session_id: The session ID for this log stream
+        """
         item_type, item_id = self.current_item if self.current_item else (None, None)
 
-        # Use Docker SDK for containers if available
-        if item_type == "container" and self.docker_client:
-            try:
-                self._log_worker_sdk(item_id)
-                return
-            except Exception as e:
-                logger.warning(f"Docker SDK streaming failed, falling back to CLI: {e}")
+        if not self.docker_client:
+            self.log_queue.put((session_id, "error", "Docker client not available"))
+            return
 
-        # Fall back to CLI approach
         try:
-            # Prepare subprocess kwargs
-            popen_kwargs = {
-                "stdout": subprocess.PIPE,
-                "stderr": subprocess.STDOUT,
-                "text": True,
-                "bufsize": 1,
-            }
-
-            # Set up environment with correct PWD
-            env = os.environ.copy()
-
-            # Add cwd if we have a working directory set
-            if hasattr(self, "working_directory") and self.working_directory:
-                popen_kwargs["cwd"] = self.working_directory
-                env["PWD"] = self.working_directory
-
-            popen_kwargs["env"] = env
-            # Start the Docker process
-            self.process = subprocess.Popen(docker_cmd, **popen_kwargs)
-            # Read lines from the process
-            line_count = 0
-            has_any_logs = False
-
-            # Set a timer to check if we've received any logs
-            check_timer = threading.Timer(
-                2.0, lambda: self._check_no_logs_found() if not has_any_logs else None
-            )
-            check_timer.start()
-
-            for line in self.process.stdout:
-                if self.stop_event.is_set():
-                    break
-
-                # Strip the line and add to queue
-                line = line.rstrip()
-                if line:
-                    has_any_logs = True
-                    line_count += 1
-                    self.log_queue.put(("log", line))
-                    # Log first few lines for debugging handled elsewhere
-
-            # Cancel timer if still running
-            check_timer.cancel()
-
+            if item_type == "container":
+                # Stream logs for a single container
+                self._stream_container_logs(item_id, session_id)
+            elif item_type == "stack":
+                # Stream logs for all containers in a stack
+                self._stream_stack_logs(session_id)
+            else:
+                self.log_queue.put(
+                    (session_id, "error", f"Unknown item type: {item_type}")
+                )
         except Exception as e:
             logger.error(f"Error in log worker: {e}", exc_info=True)
-            self.log_queue.put(("error", f"Error streaming logs: {str(e)}"))
-        finally:
-            if self.process:
-                self.process.stdout.close()
-                self.process.wait()
+            self.log_queue.put((session_id, "error", f"Error streaming logs: {str(e)}"))
 
-    def _log_worker_sdk(self, container_id):
-        """Worker thread that uses Docker SDK to stream container logs."""
+    def _stream_container_logs(self, container_id, session_id):
+        """Stream logs for a single container using Docker SDK.
+
+        Args:
+            container_id: The container ID
+            session_id: The session ID for this log stream
+        """
         try:
             container = self.docker_client.containers.get(container_id)
 
             # Convert tail and since parameters
             tail = int(self.LOG_TAIL)
-            since = self.LOG_SINCE
 
-            # Stream logs using Docker SDK
+            # Convert since parameter to proper format
+            # Docker SDK expects since as datetime or Unix timestamp
+            since = self._convert_since_to_timestamp(self.LOG_SINCE)
+
+            # First, quickly check if there are any logs without following
+            initial_logs = container.logs(
+                stream=False,
+                follow=False,
+                tail=1,  # Just check for one line
+                since=since,
+                stdout=True,
+                stderr=True,
+                timestamps=False,
+            )
+
+            # If no logs found initially, show message quickly
+            if not initial_logs or not initial_logs.strip():
+                self._check_no_logs_found()
+                # Still continue to stream in case new logs appear
+
+            # Now stream logs with follow
             log_stream = container.logs(
                 stream=True,
                 follow=True,
@@ -775,6 +626,8 @@ class LogPane(Vertical):
             )
 
             line_count = 0
+            has_any_logs = False
+
             for line in log_stream:
                 if self.stop_event.is_set():
                     break
@@ -785,14 +638,144 @@ class LogPane(Vertical):
                 line = line.rstrip()
 
                 if line:
+                    has_any_logs = True
                     line_count += 1
-                    self.log_queue.put(("log", line))
+                    self.log_queue.put((session_id, "log", line))
 
         except docker.errors.NotFound:
-            self.log_queue.put(("error", f"Container {container_id} not found"))
+            self.log_queue.put(
+                (session_id, "error", f"Container {container_id} not found")
+            )
         except Exception as e:
-            logger.error(f"Error in SDK log worker: {e}", exc_info=True)
-            # Fall back to CLI by re-raising the exception
+            logger.error(f"Error streaming container logs: {e}", exc_info=True)
+            raise
+
+    def _stream_stack_logs(self, session_id):
+        """Stream logs for all containers in a stack using Docker SDK.
+
+        Args:
+            session_id: The session ID for this log stream
+        """
+        try:
+            stack_name = self.current_item_data.get("name", self.current_item[1])
+
+            # Get all containers for this stack
+            containers = self.docker_client.containers.list(
+                all=True, filters={"label": f"com.docker.compose.project={stack_name}"}
+            )
+
+            # Remove any duplicate containers (shouldn't happen, but just in case)
+            seen_ids = set()
+            unique_containers = []
+            for container in containers:
+                if container.id not in seen_ids:
+                    seen_ids.add(container.id)
+                    unique_containers.append(container)
+            containers = unique_containers
+
+            if not containers:
+                self.log_queue.put(
+                    (session_id, "error", f"No containers found for stack {stack_name}")
+                )
+                return
+
+            # Create log streams for all containers
+            log_streams = []
+            for container in containers:
+                try:
+                    # Convert tail and since parameters
+                    tail = int(self.LOG_TAIL)
+                    since = self._convert_since_to_timestamp(self.LOG_SINCE)
+
+                    log_stream = container.logs(
+                        stream=True,
+                        follow=True,
+                        tail=tail,
+                        since=since,
+                        stdout=True,
+                        stderr=True,
+                        timestamps=False,
+                    )
+
+                    # Store container name with the stream for prefixing
+                    log_streams.append((container.name, log_stream))
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to get logs for container {container.name}: {e}"
+                    )
+
+            if not log_streams:
+                self.log_queue.put(
+                    (
+                        session_id,
+                        "error",
+                        f"Could not stream logs for any containers in stack {stack_name}",
+                    )
+                )
+                return
+
+            # Stream logs from all containers
+            has_any_logs = False
+
+            # Set a shorter timer to check if we've received any logs
+            # This is a compromise - we can't do instant checks for stacks without
+            # potentially missing logs from some containers
+            check_timer = threading.Timer(
+                0.5, lambda: self._check_no_logs_found() if not has_any_logs else None
+            )
+            check_timer.start()
+
+            # Create threads to read from each stream
+            from queue import Queue
+
+            # Queue to collect logs from all container threads
+            combined_queue = Queue()
+
+            def read_container_logs(name, stream):
+                """Read logs from a single container stream."""
+                try:
+                    for line in stream:
+                        if self.stop_event.is_set():
+                            break
+
+                        # Decode and strip the line
+                        if isinstance(line, bytes):
+                            line = line.decode("utf-8", errors="replace")
+                        line = line.rstrip()
+
+                        if line:
+                            # Prefix with container name for stack logs
+                            prefixed_line = f"[{name}] {line}"
+                            combined_queue.put(prefixed_line)
+                except Exception as e:
+                    logger.error(f"Error reading logs from {name}: {e}")
+
+            # Start threads for each container
+            threads = []
+            for name, stream in log_streams:
+                thread = threading.Thread(
+                    target=read_container_logs, args=(name, stream), daemon=True
+                )
+                thread.start()
+                threads.append(thread)
+
+            # Read from combined queue and forward to main log queue
+            while not self.stop_event.is_set():
+                try:
+                    # Use timeout to periodically check stop_event
+                    line = combined_queue.get(timeout=0.1)
+                    has_any_logs = True
+                    self.log_queue.put((session_id, "log", line))
+                except:
+                    # Check if all threads have finished
+                    if all(not t.is_alive() for t in threads):
+                        break
+
+            # Cancel timer if still running
+            check_timer.cancel()
+
+        except Exception as e:
+            logger.error(f"Error streaming stack logs: {e}", exc_info=True)
             raise
 
     def _process_log_queue(self):
@@ -805,14 +788,28 @@ class LogPane(Vertical):
                     break
 
                 try:
-                    msg_type, content = self.log_queue.get_nowait()
+                    queue_item = self.log_queue.get_nowait()
+
+                    # Handle both old format (msg_type, content) and new format (session_id, msg_type, content)
+                    if len(queue_item) == 2:
+                        # Old format - shouldn't happen but handle gracefully
+                        msg_type, content = queue_item
+                        session_id = 0
+                    else:
+                        # New format with session ID
+                        session_id, msg_type, content = queue_item
+
+                    # Skip if this is from an old session
+                    if session_id != 0 and session_id != self.log_session_id:
+                        continue
+
                     processed += 1
 
                     if msg_type == "log":
                         # Store all log lines
                         self.all_log_lines.append(content)
 
-                        # Apply search filter if set
+                        # Apply search filter if set (empty string means no filter)
                         if (
                             not self.search_filter
                             or self.search_filter.lower() in content.lower()
@@ -821,12 +818,15 @@ class LogPane(Vertical):
                             if self.search_filter and self.filtered_line_count == 0:
                                 self.log_display.clear()
 
-                            # Append to the text area with a newline
-                            current_text = self.log_display.text
-                            if current_text and not current_text.endswith("\n"):
-                                self.log_display.text = current_text + "\n" + content
-                            else:
-                                self.log_display.text = current_text + content + "\n"
+                            # If we're showing the "no logs found" message, clear it
+                            if self.showing_no_logs_message:
+                                self.log_display.clear()
+                                self.showing_no_logs_message = False
+
+                            # Append to the text area
+                            # Move cursor to end first, then insert
+                            self.log_display.move_cursor(self.log_display.document.end)
+                            self.log_display.insert(content + "\n")
 
                             self.filtered_line_count += 1
 
@@ -842,37 +842,20 @@ class LogPane(Vertical):
                             # First line processing handled elsewhere
                     elif msg_type == "error":
                         # Display errors (don't store these in all_log_lines)
-                        current_text = self.log_display.text
                         error_msg = f"ERROR: {content}"
-                        if current_text and not current_text.endswith("\n"):
-                            self.log_display.text = (
-                                current_text + "\n" + error_msg + "\n"
-                            )
-                        else:
-                            self.log_display.text = current_text + error_msg + "\n"
+                        # Move cursor to end first, then insert
+                        self.log_display.move_cursor(self.log_display.document.end)
+                        self.log_display.insert(error_msg + "\n")
                         logger.error(f"Queue error message: {content}")
                     elif msg_type == "no_logs":
                         # Show informative message when no logs are found
                         if self.waiting_for_logs:
                             self.log_display.clear()
                             self.waiting_for_logs = False
-                            item_type, item_id = (
-                                self.current_item if self.current_item else ("", "")
+                            self.log_display.text = self._get_no_logs_message()
+                            self.showing_no_logs_message = (
+                                True  # Mark that we're showing the no logs message
                             )
-
-                            self.log_display.text = (
-                                f"No logs found for {item_type}: {item_id}\n\n"
-                            )
-                            self.log_display.text += "This could mean:\n"
-                            self.log_display.text += "  • The container/stack hasn't produced logs in the selected time range\n"
-                            self.log_display.text += (
-                                "  • The container/stack was recently started\n"
-                            )
-                            self.log_display.text += (
-                                "  • Logs may have been cleared or rotated\n\n"
-                            )
-                            self.log_display.text += "Try adjusting the log settings above to see more history.\n\n"
-                            self.log_display.text += "Waiting for new logs..."
 
                 except queue.Empty:
                     break
@@ -891,16 +874,71 @@ class LogPane(Vertical):
         except Exception as e:
             logger.error(f"Error processing log queue: {e}", exc_info=True)
 
+    def _get_no_logs_message(self):
+        """Get the formatted 'No logs found' message."""
+        item_type, item_id = self.current_item if self.current_item else ("", "")
+        return (
+            f"No logs found for {item_type}: {item_id}\n\n"
+            "This could mean:\n"
+            "  • The container/stack hasn't produced logs in the selected time range\n"
+            "  • The container/stack was recently started\n"
+            "  • Logs may have been cleared or rotated\n\n"
+            "Try adjusting the log settings above to see more history.\n\n"
+            "Waiting for new logs..."
+        )
+
     def _check_no_logs_found(self):
         """Check if no logs were found and show an informative message."""
         if self.waiting_for_logs and not self.initial_log_check_done:
             # No logs received yet
-            self.log_queue.put(("no_logs", ""))
+            # Note: We don't have session_id here, but it's okay for no_logs message
+            self.log_queue.put((0, "no_logs", ""))
+
+    def _convert_since_to_timestamp(self, since_str):
+        """Convert a time string like '5m' or '1h' to a Unix timestamp.
+
+        Args:
+            since_str: Time string (e.g., '5m', '1h', '24h')
+
+        Returns:
+            Unix timestamp for the 'since' parameter
+        """
+        import re
+        import time
+
+        # Parse the time unit and value
+        match = re.match(r"^(\d+)([mhd])$", since_str)
+        if not match:
+            # If format is invalid, default to 15 minutes
+            logger.warning(f"Invalid since format: {since_str}, defaulting to 15m")
+            return int(time.time() - 15 * 60)
+
+        value = int(match.group(1))
+        unit = match.group(2)
+
+        # Convert to seconds
+        if unit == "m":
+            seconds = value * 60
+        elif unit == "h":
+            seconds = value * 3600
+        elif unit == "d":
+            seconds = value * 86400
+        else:
+            seconds = 15 * 60  # Default to 15 minutes
+
+        # Return Unix timestamp for 'since' time
+        return int(time.time() - seconds)
 
     def _refilter_logs(self):
         """Re-filter and display all stored log lines based on current search filter."""
         self.log_display.clear()
         self.filtered_line_count = 0  # Reset count
+
+        # If we're showing the "no logs found" message and there are no logs,
+        # preserve that message regardless of filter
+        if self.showing_no_logs_message and len(self.all_log_lines) == 0:
+            self.log_display.text = self._get_no_logs_message()
+            return
 
         # Build filtered text
         filtered_lines = []
@@ -928,7 +966,9 @@ class LogPane(Vertical):
     def on_input_changed(self, event):
         """Handle search input changes."""
         if event.input.id == "search-input":
-            self.search_filter = event.value
+            self.search_filter = (
+                event.value.strip()
+            )  # Strip whitespace to treat empty strings as no filter
             # Re-filter existing logs when search filter changes
             self._refilter_logs()
 
@@ -966,19 +1006,20 @@ class LogPane(Vertical):
 
     def _restart_logs(self):
         """Restart log streaming with new settings."""
-        # Stop current logs
-        self._stop_logs()
-
-        # Clear display and show loading message
+        # Clear display and show loading message immediately
         self.log_display.clear()
         self.all_log_lines.clear()
         self.filtered_line_count = 0
+        self.showing_no_logs_message = False  # Reset when restarting logs
 
         # Show loading message
         item_type, item_id = self.current_item
         self.log_display.text = f"Reloading logs for {item_type}: {item_id}...\n"
         self.waiting_for_logs = True
         self.initial_log_check_done = False
+
+        # Stop current logs after showing the loading message
+        self._stop_logs()
 
         # Start logs again
         self._start_logs()
@@ -1000,8 +1041,9 @@ class LogPane(Vertical):
                         )
                     else:
                         logger.error("Failed to copy to clipboard")
+                        # Show error notification
                         self.app.notify(
-                            "Copy failed - clipboard not available",
+                            "Failed to copy to clipboard. Please install xclip or pyperclip.",
                             severity="error",
                             timeout=3,
                         )

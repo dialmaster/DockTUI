@@ -18,8 +18,9 @@ dockerview is a modern terminal user interface (TUI) for real-time monitoring an
 
 - Python 3.8 or higher
 - Docker Engine installed and running
-- Docker Compose
+- Docker Compose v2 (the `docker compose` command)
 - Unix-like terminal (Linux, macOS, or WSL2 on Windows)
+- No Docker CLI required - dockerview uses the Docker SDK directly
 
 **Important:** dockerview must be run on the same filesystem where your Docker Compose files are located. It cannot currently monitor remote Docker instances.
 
@@ -89,14 +90,26 @@ log:
 ### Environment Variable Overrides
 
 You can override any configuration value using environment variables:
+
+#### Log Configuration
 - `DOCKERVIEW_LOG_MAX_LINES` - Override `log.max_lines`
 - `DOCKERVIEW_LOG_TAIL` - Override `log.tail`
 - `DOCKERVIEW_LOG_SINCE` - Override `log.since`
 
+#### Clipboard Configuration
+- `DOCKERVIEW_IN_CONTAINER` - Set to `1`, `true`, or `yes` when running inside a container
+- `DOCKERVIEW_CLIPBOARD_FILE` - Path to a mounted file for clipboard sharing in containers
+
 Example:
 ```bash
+# Log configuration
 export DOCKERVIEW_LOG_TAIL=500
 export DOCKERVIEW_LOG_SINCE=1h
+
+# Container clipboard configuration
+export DOCKERVIEW_IN_CONTAINER=1
+export DOCKERVIEW_CLIPBOARD_FILE=/tmp/clipboard.txt
+
 ./start.sh
 ```
 
@@ -177,15 +190,35 @@ export DOCKERVIEW_DEBUG=1
 python -m dockerview
 ```
 
-### WSL2 Clipboard Support
+### Clipboard Support
 
-If you're running dockerview in WSL2 and want to use the clipboard functionality (right-click copy in log pane), you may need to install `xclip`:
+dockerview provides multiple clipboard integration methods to work across different environments:
+
+#### Local Environments
+- Uses `pyperclip` for cross-platform clipboard support (installed by default)
+- Falls back to `xclip` on Linux systems
+
+#### Linux/WSL2
+For clipboard functionality on Linux or WSL2, install `xclip`:
 
 ```bash
 sudo apt-get install xclip
 ```
 
-This is optional - dockerview will attempt to use PowerShell's clipboard integration first, but xclip provides a fallback.
+#### Container Environments
+When running dockerview in a container:
+
+1. **With X11 Forwarding**: Install `xclip` in your container and forward X11
+2. **With File-based Clipboard**: Mount a file for clipboard sharing:
+   ```bash
+   docker run -v /tmp/clipboard:/tmp/clipboard \
+              -e DOCKERVIEW_IN_CONTAINER=1 \
+              -e DOCKERVIEW_CLIPBOARD_FILE=/tmp/clipboard/clipboard.txt \
+              dockerview
+   ```
+
+#### Clipboard Fallback
+If clipboard access is unavailable, dockerview will display a modal dialog with the selected text for manual copying. This ensures you can always access copied text regardless of your environment.
 
 ## Limitations and Known Issues
 
@@ -209,13 +242,15 @@ dockerview is built using Python with the following core components:
    - Interactive controls for log filtering and auto-follow
    - Modal dialogs for actions and confirmations
 
-2. **Docker Integration Layer** (docker-py)
-   - Real-time container statistics collection
+2. **Docker Integration Layer** (docker-py SDK)
+   - Direct SDK integration without Docker CLI dependency
+   - Real-time container statistics collection using concurrent threading
    - Docker Compose stack detection and grouping
    - Container port mapping display
-   - Container and stack command execution (start/stop/restart/recreate)
-   - Real-time log streaming for containers and stacks
+   - Non-blocking container and stack operations (start/stop/restart/recreate)
+   - Real-time log streaming with configurable time ranges and tail limits
    - Event monitoring for container state changes
+   - Thread-safe concurrent operations for improved performance
 
 3. **State Management**
    - Container and stack state tracking
@@ -224,16 +259,23 @@ dockerview is built using Python with the following core components:
 
 ### Data Flow
 
-Docker Engine <-> Docker SDK <-> DockerManager <-> UI Components
+Docker Engine <-> docker-py SDK <-> DockerManager (with threading) <-> UI Components
 
 ### Key Components
 
 - **DockerViewApp**: Main Textual application class with keyboard bindings for container management
-- **ContainerList**: Navigable list of containers with real-time stats, grouped by stacks
+- **ContainerList**: Navigable list of containers with real-time stats, now with separate sections for Docker networks and Compose stacks
 - **StackHeader**: Collapsible headers for Docker Compose stacks
+- **NetworkHeader**: Separate section headers for Docker networks
 - **StatusBar**: Displays detailed information about the selected container or stack
-- **DockerManager**: Handles Docker SDK integration, container/stack data retrieval, and command execution
-- **LogPane**: Split-pane view for real-time container/stack log streaming with filtering
+- **DockerManager**: Handles direct Docker SDK integration with concurrent operations:
+  - Thread-based non-blocking container operations
+  - Parallel stats collection for all containers
+  - Multi-stream log aggregation for stacks
+- **LogPane**: Split-pane view with enhanced log streaming:
+  - Real-time filtering with proper empty filter handling
+  - Session-based log streaming to prevent duplicates
+  - Configurable time ranges and tail limits
 - **StateManager**: Dedicated state management component
 
 ## Development
