@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3](https://github.com/dialmaster/dockerview/compare/v0.1.2...v0.1.3) (2025-06-18)
+
+
+### Bug Fixes
+
+* add bootstrap-sha to release-please config for proper tag detection ([aef8060](https://github.com/dialmaster/dockerview/commit/aef80603f6f08f05ff79f7b92a047a3006176f4e))
+
+
+### Documentation
+
+* document volume/network management and missing shortcuts ([553bcea](https://github.com/dialmaster/dockerview/commit/553bceab3fa5d9e5906cf9dbe75c5da16e5afabf))
+* document volume/network management and missing shortcuts ([f4a7a63](https://github.com/dialmaster/dockerview/commit/f4a7a63272244fbc90150a220ed4061dfaf840c6))
+
+
+### Miscellaneous
+
+* **main:** release 0.1.2 ([ca2bc4b](https://github.com/dialmaster/dockerview/commit/ca2bc4ba8e53e177c3b2100a781e2223bd307ec1))
+
 ## [0.1.2](https://github.com/dialmaster/dockerview/compare/v0.1.1...v0.1.2) (2025-06-18)
 
 
