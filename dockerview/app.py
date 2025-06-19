@@ -130,10 +130,6 @@ class DockerViewApp(App):
     """A Textual TUI application for monitoring Docker containers and stacks."""
 
     CSS = """
-    Screen {
-        background: $surface-darken-1;
-    }
-
     Container {
         height: auto;
     }

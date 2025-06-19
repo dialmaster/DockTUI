@@ -3,11 +3,11 @@
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
-from textual.screen import ModalScreen
+from textual.screen import Screen
 from textual.widgets import Button, Checkbox, Static
 
 
-class ConfirmModal(ModalScreen[bool]):
+class ConfirmModal(Screen[bool]):
     """A reusable confirmation modal with optional checkbox.
 
     This modal follows Textual best practices by:
