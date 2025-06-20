@@ -226,3 +226,85 @@ class DockerActions:
         self._recreating_item_type = None
 
         return new_container_id, new_container_data
+
+    def execute_image_command(self: "DockerViewApp", command: str) -> None:
+        """Execute a Docker command on the selected image.
+
+        Args:
+            command: The command to execute (remove_image, remove_unused_images)
+        """
+        if command == "remove_image":
+            if not self.container_list or not self.container_list.selected_item:
+                self.error_display.update("No image selected")
+                return
+
+            item_type, item_id = self.container_list.selected_item
+            if item_type != "image":
+                self.error_display.update("Selected item is not an image")
+                return
+
+            image_data = self.container_list.image_manager.selected_image_data
+            if not image_data:
+                self.error_display.update("No image data available")
+                return
+
+            container_names = image_data.get("container_names", [])
+            if container_names:
+                self.error_display.update(
+                    f"Cannot remove image: in use by {len(container_names)} container(s)"
+                )
+                return
+
+            next_selection = (
+                self.container_list.image_manager.get_next_selection_after_removal(
+                    {item_id}
+                )
+            )
+
+            success, message = self.docker.remove_image(item_id)
+            if success:
+                self.error_display.update(message)
+                self.container_list.image_manager.mark_image_as_removed(item_id)
+
+                if next_selection:
+                    self.container_list.image_manager.select_image(next_selection)
+                    self.container_list.image_manager._preserve_selected_image_id = (
+                        next_selection
+                    )
+
+                self.set_timer(2.0, self.action_refresh)
+            else:
+                self.error_display.update(f"Error: {message}")
+
+        elif command == "remove_unused_images":
+            unused_images = self.docker.get_unused_images()
+            unused_count = len(unused_images)
+
+            if unused_count == 0:
+                self.error_display.update("No unused images found")
+                return
+
+            unused_image_ids = {img["id"] for img in unused_images}
+
+            next_selection = (
+                self.container_list.image_manager.get_next_selection_after_removal(
+                    unused_image_ids
+                )
+            )
+
+            success, message, removed_count = self.docker.remove_unused_images()
+            if success:
+                self.error_display.update(message)
+
+                for img in unused_images:
+                    self.container_list.image_manager.mark_image_as_removed(img["id"])
+
+                if next_selection:
+                    self.container_list.image_manager.select_image(next_selection)
+                    self.container_list.image_manager._preserve_selected_image_id = (
+                        next_selection
+                    )
+
+                self.set_timer(2.0, self.action_refresh)
+            else:
+                self.error_display.update(f"Error: {message}")

@@ -151,6 +151,10 @@ When no logs are found within the configured time range, dockerview will display
 - `u`: Recreate selected container or stack (docker compose up -d)
 - `d`: Docker compose down (with confirmation dialog)
 
+### Image Management
+- `r`: Remove selected unused image (with confirmation)
+- `R`: Remove all unused images (with confirmation)
+
 ### Command Palette
 - `Ctrl+\`: Open command palette for quick access to all actions
 
@@ -169,6 +173,7 @@ When no logs are found within the configured time range, dockerview will display
 - Container port mapping display
 - Split-pane log viewer with real-time log streaming
 - Container and stack management (start/stop/restart/recreate/down)
+- Docker image management: view usage, remove individual unused images, and prune all unused images
 - Docker images overview with container usage information
 - Docker volume management with stack associations
 - Docker network overview and management

@@ -130,7 +130,8 @@ class ContainerListBase(VerticalScroll):
 
     .images-group DataTable {
         display: block;
-        height: 20;  /* Fixed height in rows */
+        height: auto;
+        max-height: 100%;
     }
 
     /* Make sure the cursor is visible and properly styled */

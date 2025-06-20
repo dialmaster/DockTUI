@@ -1,8 +1,9 @@
 """Image-specific functionality for the container list widget."""
 
 import logging
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Set, Tuple
 
+from rich.text import Text
 from textual.containers import Container
 from textual.widgets import DataTable
 
@@ -27,6 +28,10 @@ class ImageManager:
         self._images_in_new_data = set()
         self.selected_image_data: Optional[Dict] = None
         self._table_initialized = False
+        self._removed_images: Set[str] = set()  # Track removed images for strikethrough
+        self._preserve_selected_image_id: Optional[str] = (
+            None  # Image ID to preserve during refresh
+        )
 
         # For compatibility with existing structure
         self.image_headers = {}  # Empty dict for compatibility
@@ -126,6 +131,18 @@ class ImageManager:
                 repository = first_tag
                 tag = "latest"
 
+        # Format repository name - truncate beginning if > 20 chars
+        display_repository = repository
+        if len(repository) > 25:
+            display_repository = (
+                "..." + repository[-25:]
+            )  # Keep last 17 chars plus ellipsis
+
+        # Format tag - truncate end if > 10 chars
+        display_tag = tag
+        if len(tag) > 10:
+            display_tag = tag[:10] + "..."
+
         # Format container info
         container_names = image_data.get("container_names", [])
         if container_names:
@@ -148,16 +165,27 @@ class ImageManager:
         if created != "N/A" and "T" in created:
             created = created.split("T")[0]  # Just the date part
 
-        # Create row data
-        row_data = (
-            repository,
-            tag,
-            image_id[:12],  # Short ID
-            containers_text,
-            created,
-            image_data.get("size", "N/A"),
-            status,
-        )
+        # Create row data - apply strikethrough if image is marked as removed
+        if image_id in self._removed_images:
+            row_data = (
+                Text(display_repository, style="strike dim"),
+                Text(display_tag, style="strike dim"),
+                Text(image_id[:12], style="strike dim"),  # Short ID
+                Text(containers_text, style="strike dim"),
+                Text(created, style="strike dim"),
+                Text(image_data.get("size", "N/A"), style="strike dim"),
+                Text(status, style="strike dim"),
+            )
+        else:
+            row_data = (
+                display_repository,
+                display_tag,
+                image_id[:12],  # Short ID
+                containers_text,
+                created,
+                image_data.get("size", "N/A"),
+                status,
+            )
 
         if image_id in self.image_rows:
             # Update existing row
@@ -181,6 +209,28 @@ class ImageManager:
         ):
             self.selected_image_data = image_data
 
+    def mark_image_as_removed(self, image_id: str) -> None:
+        """Mark an image as removed by applying strikethrough style.
+
+        Args:
+            image_id: The ID of the image to mark as removed
+        """
+        if not self.images_table or image_id not in self.image_rows:
+            return
+
+        # Add to removed images set
+        self._removed_images.add(image_id)
+
+        # Get row index
+        row_index = self.image_rows[image_id]
+
+        # Update all cells in the row with strikethrough style
+        for col_index in range(len(self.images_table.columns)):
+            cell_value = self.images_table.get_cell_at((row_index, col_index))
+            self.images_table.update_cell_at(
+                (row_index, col_index), Text(str(cell_value), style="strike dim")
+            )
+
     def remove_image(self, image_id: str) -> None:
         """Remove an image from the table.
 
@@ -190,25 +240,25 @@ class ImageManager:
         if not self.images_table or image_id not in self.image_rows:
             return
 
-        row_index = self.image_rows[image_id]
-
-        # Get the row key before removing
-        row_key = None
-        for row in self.images_table.rows:
-            if row.index == row_index:
-                row_key = row.key
-                break
-
-        if row_key:
-            self.images_table.remove_row(row_key)
+        # We stored the image_id as the row key when adding rows
+        # So we can remove directly by the image_id
+        try:
+            self.images_table.remove_row(image_id)
 
             # Update row indices for remaining images
             del self.image_rows[image_id]
+
+            # Remove from removed images set if present
+            self._removed_images.discard(image_id)
+
             # Rebuild the index mapping
             self.image_rows.clear()
             for idx, row in enumerate(self.images_table.rows):
-                if row.key and hasattr(row.key, "value"):
-                    self.image_rows[row.key.value] = idx
+                # The row key is the image_id we set when adding the row
+                if row.key:
+                    self.image_rows[row.key] = idx
+        except Exception as e:
+            logger.error(f"Error removing image {image_id} from table: {e}")
 
     def cleanup_removed_images(self) -> None:
         """Remove images that are no longer present."""
@@ -220,6 +270,9 @@ class ImageManager:
         logger.debug(f"Cleaning up {len(images_to_remove)} removed images")
         for image_id in images_to_remove:
             self.remove_image(image_id)
+
+        # Clear the removed images tracking after cleanup
+        self._removed_images.clear()
 
         # Sort the table after cleanup
         logger.debug(
@@ -262,8 +315,25 @@ class ImageManager:
         Returns:
             True if the selection was handled, False otherwise
         """
-        if row_key and hasattr(row_key, "value") and row_key.value in self.image_rows:
-            image_id = row_key.value
+        if not row_key or not self.images_table:
+            return False
+
+        try:
+            # Get the row index from the row key
+            row_index = self.images_table.get_row_index(row_key)
+            if row_index is None:
+                return False
+
+            # Find the image_id from our mapping
+            image_id = None
+            for img_id, idx in self.image_rows.items():
+                if idx == row_index:
+                    image_id = img_id
+                    break
+
+            if not image_id:
+                return False
+
             self.parent.selected_item = ("image", image_id)
 
             # Find the image data from parent's data
@@ -278,7 +348,9 @@ class ImageManager:
                 SelectionChanged("image", image_id, self.selected_image_data or {})
             )
             return True
-        return False
+        except Exception as e:
+            logger.error(f"Error handling image selection: {e}")
+            return False
 
     def toggle_images_section(self) -> None:
         """Toggle the images section visibility."""
@@ -292,6 +364,57 @@ class ImageManager:
         Returns an empty dict since images use a different UI pattern.
         """
         return {}
+
+    def get_next_selection_after_removal(
+        self, removed_image_ids: Set[str]
+    ) -> Optional[str]:
+        """Determine which image should be selected after removal.
+
+        Args:
+            removed_image_ids: Set of image IDs being removed
+
+        Returns:
+            The image ID that should be selected, or None if no images remain
+        """
+        if not self.images_table or not removed_image_ids:
+            return None
+
+        current_selection = None
+        if self.parent.selected_item and self.parent.selected_item[0] == "image":
+            current_selection = self.parent.selected_item[1]
+
+        if current_selection and current_selection not in removed_image_ids:
+            return current_selection
+
+        min_removed_row_idx = float("inf")
+        for image_id in removed_image_ids:
+            if image_id in self.image_rows:
+                min_removed_row_idx = min(
+                    min_removed_row_idx, self.image_rows[image_id]
+                )
+
+        if min_removed_row_idx == float("inf"):
+            return None
+
+        for row_idx in range(min_removed_row_idx - 1, -1, -1):
+            for image_id, idx in self.image_rows.items():
+                if (
+                    idx == row_idx
+                    and image_id not in removed_image_ids
+                    and image_id not in self._removed_images
+                ):
+                    return image_id
+
+        for row_idx in range(min_removed_row_idx + 1, self.images_table.row_count):
+            for image_id, idx in self.image_rows.items():
+                if (
+                    idx == row_idx
+                    and image_id not in removed_image_ids
+                    and image_id not in self._removed_images
+                ):
+                    return image_id
+
+        return None
 
     def sort_images_table(self) -> None:
         """Sort the images table with unused images at the bottom."""

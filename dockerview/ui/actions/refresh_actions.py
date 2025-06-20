@@ -145,6 +145,14 @@ class RefreshActions:
                 for image_id, image_info in images.items():
                     self.container_list.add_image(image_info)
 
+                if self.container_list.image_manager._preserve_selected_image_id:
+                    preserved_id = (
+                        self.container_list.image_manager._preserve_selected_image_id
+                    )
+                    if preserved_id in self.container_list.image_manager.image_rows:
+                        self.container_list.image_manager.select_image(preserved_id)
+                    self.container_list.image_manager._preserve_selected_image_id = None
+
                 # Process all volumes after images
                 for volume_name, volume_info in volumes.items():
                     self.container_list.add_volume(volume_info)

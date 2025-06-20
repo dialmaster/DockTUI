@@ -1,8 +1,6 @@
 import logging
 from typing import Iterable, Union
 
-from rich.style import Style
-from rich.text import Text
 from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -16,7 +14,11 @@ from dockerview.docker_mgmt.manager import DockerManager
 from dockerview.ui.actions.docker_actions import DockerActions
 from dockerview.ui.actions.refresh_actions import RefreshActions
 from dockerview.ui.containers import ContainerList, SelectionChanged
-from dockerview.ui.dialogs.confirm_modal import ComposeDownModal
+from dockerview.ui.dialogs.confirm import (
+    ComposeDownModal,
+    RemoveImageModal,
+    RemoveUnusedImagesModal,
+)
 from dockerview.ui.viewers.log_pane import LogPane
 from dockerview.ui.widgets.status import ErrorDisplay, StatusBar
 from dockerview.utils.logging import setup_logging
@@ -103,6 +105,8 @@ class DockerViewApp(App, DockerActions, RefreshActions):
         Binding("e", "restart", "Restart Selected", show=True),
         Binding("u", "recreate", "Recreate Selected", show=True),
         Binding("d", "down", "Down Selected Stack", show=True),
+        Binding("r", "remove_image", "Remove Selected Image", show=True),
+        Binding("R", "remove_unused_images", "Remove All Unused Images", show=True),
     ]
 
     def __init__(self):
@@ -168,6 +172,16 @@ class DockerViewApp(App, DockerActions, RefreshActions):
                     "Down Selected Stack",
                     "Take down the selected stack (docker compose down)",
                     self.action_down,
+                ),
+                (
+                    "Remove Selected Image",
+                    "Remove the selected unused Docker image",
+                    self.action_remove_image,
+                ),
+                (
+                    "Remove All Unused Images",
+                    "Remove all unused Docker images",
+                    self.action_remove_unused_images,
                 ),
             ]
 
@@ -302,148 +316,55 @@ class DockerViewApp(App, DockerActions, RefreshActions):
 
         self.push_screen(modal, handle_down_confirmation)
 
-    def _update_status_bar_for_selection(
-        self,
-        item_type: Union[str, None],
-        item_id: Union[str, None],
-        item_data: Union[dict, None],
-    ) -> None:
-        """Update the status bar to show available actions for the current selection.
-
-        Args:
-            item_type: Type of selected item (container, stack, network, etc.)
-            item_id: ID of the selected item
-            item_data: Data for the selected item
-        """
-        if not self.status_bar:
+    def action_remove_image(self) -> None:
+        """Remove the selected unused image with confirmation dialog."""
+        if not self.container_list or not self.container_list.selected_item:
+            self.error_display.update("No image selected")
             return
 
-        # Store current selection type for dynamic bindings
-        self._current_selection_type = item_type
+        item_type, item_id = self.container_list.selected_item
+        if item_type != "image":
+            self.error_display.update("Selected item is not an image")
+            return
 
-        # Refresh bindings to update footer
-        self.refresh_bindings()
+        image_data = self.container_list.image_manager.selected_image_data
+        if not image_data:
+            self.error_display.update("No image data available")
+            return
 
-        if not item_type or item_type == "none":
-            self.status_bar.update(
-                Text(
-                    "No selection - Select an item to see available actions",
-                    Style(color="bright_black", italic=True),
-                )
+        container_names = image_data.get("container_names", [])
+        if container_names:
+            self.error_display.update(
+                f"Cannot remove image: in use by {len(container_names)} container(s)"
             )
             return
 
-        # Build status message based on item type
-        status_parts = []
+        modal = RemoveImageModal(image_data)
 
-        if item_type == "container":
-            container_name = item_data.get("name", item_id) if item_data else item_id
-            container_status = (
-                item_data.get("status", "unknown") if item_data else "unknown"
-            )
+        def handle_remove_confirmation(confirmed: bool) -> None:
+            """Handle the result from the confirmation modal."""
+            if confirmed:
+                self.execute_image_command("remove_image")
 
-            status_parts.append(
-                Text(f"Container: {container_name} ", Style(color="white", bold=True))
-            )
+        self.push_screen(modal, handle_remove_confirmation)
 
-            # Show container status with appropriate color
-            if "running" in container_status.lower():
-                status_parts.append(Text(f"[{container_status}]", Style(color="green")))
-            elif "exited" in container_status.lower():
-                status_parts.append(Text(f"[{container_status}]", Style(color="red")))
-            else:
-                status_parts.append(
-                    Text(f"[{container_status}]", Style(color="yellow"))
-                )
+    def action_remove_unused_images(self) -> None:
+        """Remove all unused images with confirmation dialog."""
+        unused_images = self.docker.get_unused_images()
+        unused_count = len(unused_images)
 
-            status_parts.append(Text(" - Actions: ", Style(color="bright_black")))
-            status_parts.append(
-                Text("Start, Stop, Restart, Recreate", Style(color="cyan"))
-            )
+        if unused_count == 0:
+            self.error_display.update("No unused images found")
+            return
 
-        elif item_type == "stack":
-            stack_name = item_data.get("name", item_id) if item_data else item_id
-            running = item_data.get("running", 0) if item_data else 0
-            exited = item_data.get("exited", 0) if item_data else 0
-            can_recreate = item_data.get("can_recreate", True) if item_data else True
+        modal = RemoveUnusedImagesModal(unused_count)
 
-            status_parts.append(
-                Text(f"Stack: {stack_name} ", Style(color="white", bold=True))
-            )
-            status_parts.append(
-                Text(
-                    f"[{running} running, {exited} exited]",
-                    Style(color="green" if running > 0 else "red"),
-                )
-            )
+        def handle_remove_all_confirmation(confirmed: bool) -> None:
+            """Handle the result from the confirmation modal."""
+            if confirmed:
+                self.execute_image_command("remove_unused_images")
 
-            status_parts.append(Text(" - Actions: ", Style(color="bright_black")))
-            actions = ["Start", "Stop", "Restart"]
-            if can_recreate:
-                actions.append("Recreate")
-            actions.append("Down")
-            status_parts.append(Text(", ".join(actions), Style(color="cyan")))
-
-            if not can_recreate:
-                status_parts.append(
-                    Text(" (Recreate unavailable)", Style(color="red", italic=True))
-                )
-
-        elif item_type == "network":
-            network_name = item_data.get("name", item_id) if item_data else item_id
-            container_count = (
-                len(item_data.get("connected_containers", [])) if item_data else 0
-            )
-
-            status_parts.append(
-                Text(f"Network: {network_name} ", Style(color="white", bold=True))
-            )
-            status_parts.append(
-                Text(f"[{container_count} containers]", Style(color="blue"))
-            )
-            status_parts.append(
-                Text(
-                    " - No actions available", Style(color="bright_black", italic=True)
-                )
-            )
-
-        elif item_type == "image":
-            image_tag = item_data.get("tag", "<none>") if item_data else "<none>"
-            if image_tag == "<none>" and item_data:
-                image_tag = item_data.get("id", "unknown")[:12]
-
-            status_parts.append(
-                Text(f"Image: {image_tag} ", Style(color="white", bold=True))
-            )
-            status_parts.append(
-                Text(
-                    " - No actions available", Style(color="bright_black", italic=True)
-                )
-            )
-
-        elif item_type == "volume":
-            volume_name = item_data.get("name", item_id) if item_data else item_id
-
-            status_parts.append(
-                Text(f"Volume: {volume_name} ", Style(color="white", bold=True))
-            )
-            status_parts.append(
-                Text(
-                    " - No actions available", Style(color="bright_black", italic=True)
-                )
-            )
-
-        else:
-            status_parts.append(
-                Text(f"Selected: {item_type} ", Style(color="white", bold=True))
-            )
-
-        # Combine all parts into one Text object
-        combined_text = Text()
-        for part in status_parts:
-            combined_text.append(part)
-
-        self.status_bar.update(combined_text)
+        self.push_screen(modal, handle_remove_all_confirmation)
 
     def check_action(self, action: str, parameters: tuple) -> Union[bool, None]:
         """Check if an action should be enabled.
@@ -453,29 +374,30 @@ class DockerViewApp(App, DockerActions, RefreshActions):
             False: Hide the key from the footer
             None: Show the key as disabled (dimmed) in the footer
         """
-        # Always allow quit
+        SELECTION_ACTIONS = {
+            "container": ["start", "stop", "restart", "recreate"],
+            "service": ["start", "stop", "restart", "recreate"],
+            "stack": ["start", "stop", "restart", "recreate", "down"],
+            "network": [],
+            "image": ["remove_image", "remove_unused_images"],
+            "volume": [],
+            "none": [],
+        }
+
         if action == "quit":
             return True
 
-        # For other actions, check if they apply to current selection
         selection_type = self._current_selection_type
 
-        # If no selection or selection is network/image/volume, hide action bindings
-        if not selection_type or selection_type in [
-            "network",
-            "image",
-            "volume",
-            "none",
-        ]:
-            if action in ["start", "stop", "restart", "recreate", "down"]:
-                return False
-
-        # Down action only applies to stacks
-        if action == "down" and selection_type != "stack":
+        if not selection_type or selection_type not in SELECTION_ACTIONS:
             return False
 
-        # Default to allowing the action
-        return True
+        available_actions = SELECTION_ACTIONS[selection_type]
+
+        if action in available_actions:
+            return True
+        else:
+            return False
 
     def on_selection_changed(self, event: SelectionChanged) -> None:
         """Handle selection changes from the container list.
@@ -487,17 +409,17 @@ class DockerViewApp(App, DockerActions, RefreshActions):
             return
 
         if event.item_type == "none":
-            # Clear selection
             self.log_pane.clear_selection()
-            self._update_status_bar_for_selection("none", None, None)
+            self.container_list._update_footer_with_selection()
+            self.status_bar.refresh()
         else:
-            # Update log pane with new selection
             self.log_pane.update_selection(
                 event.item_type, event.item_id, event.item_data
             )
-            self._update_status_bar_for_selection(
-                event.item_type, event.item_id, event.item_data
-            )
+            self.container_list._update_footer_with_selection()
+            self.status_bar.refresh()
+        self._current_selection_type = event.item_type
+        self.refresh_bindings()
 
 
 def main():
