@@ -654,6 +654,221 @@ class DockerManager:
         self.last_error = None
         return volumes
 
+    def get_images(self) -> Dict[str, Dict]:
+        """Retrieve all Docker images with usage information.
+
+        Returns:
+            Dict[str, Dict]: A dictionary mapping image IDs to their details including:
+                - id: Image ID (short form)
+                - tags: List of image tags
+                - created: Creation timestamp
+                - size: Image size (human-readable)
+                - containers: Number of containers using this image
+                - architecture: Image architecture
+                - os: Operating system
+        """
+        images = {}
+        try:
+            start_time = time.time()
+
+            # Fetch images and containers concurrently
+            docker_images = []
+            all_containers = []
+            threads = []
+
+            def fetch_images():
+                nonlocal docker_images
+                docker_images = self.client.images.list()
+
+            def fetch_containers():
+                nonlocal all_containers
+                all_containers = self.client.containers.list(all=True)
+
+            # Create threads for concurrent fetching
+            image_thread = threading.Thread(target=fetch_images)
+            container_thread = threading.Thread(target=fetch_containers)
+
+            image_thread.start()
+            container_thread.start()
+
+            # Wait for both threads to complete
+            image_thread.join(timeout=5.0)
+            container_thread.join(timeout=5.0)
+
+            # Collect container info per image efficiently
+            image_container_info = defaultdict(
+                lambda: {"names": [], "has_running": False}
+            )
+            for container in all_containers:
+                # Get the image ID from container attrs - only access attrs once
+                try:
+                    attrs = container.attrs
+                    image_id = attrs.get("Image", "")
+                    if image_id.startswith("sha256:"):
+                        image_id = image_id[7:]  # Remove sha256: prefix
+                    if image_id:
+                        # Use short form (first 12 chars)
+                        short_id = image_id[:12]
+                        container_name = container.name
+                        image_container_info[short_id]["names"].append(container_name)
+                        # Check if container is running
+                        if container.status == "running":
+                            image_container_info[short_id]["has_running"] = True
+                except Exception:
+                    # Skip containers we can't process
+                    continue
+
+            # Process images with minimal attribute access
+            for image in docker_images:
+                try:
+                    # Get image attributes once
+                    attrs = image.attrs
+                    image_id = image.id
+                    if image_id.startswith("sha256:"):
+                        image_id = image_id[7:]  # Remove sha256: prefix
+                    short_id = image_id[:12]
+
+                    # Calculate human-readable size efficiently
+                    size_bytes = attrs.get("Size", 0)
+                    if size_bytes >= 1073741824:  # >= 1 GB (1024^3)
+                        size_str = f"{size_bytes / 1073741824:.1f} GB"
+                    elif size_bytes >= 1048576:  # >= 1 MB (1024^2)
+                        size_str = f"{size_bytes / 1048576:.1f} MB"
+                    elif size_bytes >= 1024:  # >= 1 KB
+                        size_str = f"{size_bytes / 1024:.1f} KB"
+                    else:
+                        size_str = f"{size_bytes} B"
+
+                    # Get architecture and OS from attributes (not config)
+                    architecture = attrs.get("Architecture", "unknown")
+                    os_type = attrs.get("Os", "unknown")
+
+                    container_info = image_container_info.get(
+                        short_id, {"names": [], "has_running": False}
+                    )
+
+                    images[short_id] = {
+                        "id": short_id,
+                        "tags": image.tags or [],
+                        "created": attrs.get("Created", "N/A"),
+                        "size": size_str,
+                        "containers": len(container_info["names"]),
+                        "container_names": container_info["names"],
+                        "has_running": container_info["has_running"],
+                        "architecture": architecture,
+                        "os": os_type,
+                    }
+
+                except Exception as image_error:
+                    # Log error but continue processing other images
+                    logger.error(
+                        f"Error processing image {getattr(image, 'id', 'unknown')}: {str(image_error)}"
+                    )
+                    continue
+
+            elapsed = time.time() - start_time
+            logger.debug(f"Retrieved {len(images)} images in {elapsed:.3f}s")
+
+        except Exception as e:
+            error_msg = f"Error getting images: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            self.last_error = error_msg
+            return {}
+
+        # Clear any previous error if the operation succeeded
+        self.last_error = None
+        return images
+
+    def remove_image(self, image_id: str, force: bool = False) -> Tuple[bool, str]:
+        """Remove a Docker image.
+
+        Args:
+            image_id: ID of the image to remove
+            force: Force removal even if the image is in use
+
+        Returns:
+            Tuple[bool, str]: (success, message)
+        """
+        try:
+            image = self.client.images.get(image_id)
+            image.remove(force=force)
+            logger.info(f"Successfully removed image: {image_id}")
+            return True, f"Image {image_id[:12]} removed successfully"
+        except docker.errors.ImageNotFound:
+            msg = f"Image {image_id[:12]} not found"
+            logger.error(msg)
+            self.last_error = msg
+            return False, msg
+        except docker.errors.APIError as e:
+            if "image is being used" in str(e):
+                msg = f"Image {image_id[:12]} is in use by a container"
+            else:
+                msg = f"Failed to remove image: {str(e)}"
+            logger.error(msg)
+            self.last_error = msg
+            return False, msg
+        except Exception as e:
+            msg = f"Error removing image: {str(e)}"
+            logger.error(msg, exc_info=True)
+            self.last_error = msg
+            return False, msg
+
+    def get_unused_images(self) -> List[Dict]:
+        """Get a list of unused (dangling) images.
+
+        Returns:
+            List[Dict]: List of unused image information
+        """
+        try:
+            all_images = self.get_images()
+
+            unused_images = []
+            for image_id, image_data in all_images.items():
+                container_names = image_data.get("container_names", [])
+                if not container_names:
+                    unused_images.append(image_data)
+
+            return unused_images
+        except Exception as e:
+            logger.error(f"Error getting unused images: {str(e)}", exc_info=True)
+            self.last_error = f"Error getting unused images: {str(e)}"
+            return []
+
+    def remove_unused_images(self) -> Tuple[bool, str, int]:
+        """Remove all unused (dangling) images.
+
+        Returns:
+            Tuple[bool, str, int]: (success, message, count of removed images)
+        """
+        try:
+            unused_images = self.get_unused_images()
+            if not unused_images:
+                return True, "No unused images to remove", 0
+
+            removed_count = 0
+            failed_count = 0
+
+            for image_data in unused_images:
+                image_id = image_data["id"]
+                success, _ = self.remove_image(image_id, force=False)
+                if success:
+                    removed_count += 1
+                else:
+                    failed_count += 1
+
+            if failed_count > 0:
+                msg = f"Removed {removed_count} images, failed to remove {failed_count}"
+                return False, msg, removed_count
+            else:
+                msg = f"Successfully removed {removed_count} unused images"
+                return True, msg, removed_count
+
+        except Exception as e:
+            msg = f"Error removing unused images: {str(e)}"
+            logger.error(msg, exc_info=True)
+            self.last_error = msg
+            return False, msg, 0
+
     def execute_stack_command(
         self, stack_name: str, config_file: str, command: str
     ) -> bool:

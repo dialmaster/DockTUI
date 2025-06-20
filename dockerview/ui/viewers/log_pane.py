@@ -412,6 +412,30 @@ class LogPane(Vertical):
             )
             self.refresh()
             return
+        elif item_type == "image":
+            self.header.update(f"📋 Log Pane - Image: {item_id[:12]}")
+            # Images don't have logs, show a message
+            self.log_display.display = True
+            self.no_selection_display.display = False
+            self.log_display.clear()
+            self.log_display.text = (
+                "Images do not have logs. Select a container or stack to view logs."
+            )
+            self.refresh()
+            return
+        elif item_type == "volume":
+            self.header.update(
+                f"📋 Log Pane - Volume: {item_data.get('name', item_id)}"
+            )
+            # Volumes don't have logs, show a message
+            self.log_display.display = True
+            self.no_selection_display.display = False
+            self.log_display.clear()
+            self.log_display.text = (
+                "Volumes do not have logs. Select a container or stack to view logs."
+            )
+            self.refresh()
+            return
         else:
             self.header.update("📋 Log Pane - Unknown Selection")
 

@@ -139,8 +139,8 @@ When no logs are found within the configured time range, dockerview will display
 ## Keyboard Shortcuts
 
 ### Navigation
-- `↑/↓`: Navigate through containers and stacks
-- `←/→`: Collapse/expand stacks
+- `↑/↓`: Navigate through containers, stacks, images, volumes, and networks
+- `←/→` or `Enter`: Collapse/expand sections
 - `Tab`: Switch focus between panes
 - `q`: Quit the application
 
@@ -150,6 +150,13 @@ When no logs are found within the configured time range, dockerview will display
 - `e`: Restart selected container or stack
 - `u`: Recreate selected container or stack (docker compose up -d)
 - `d`: Docker compose down (with confirmation dialog)
+
+### Image Management
+- `r`: Remove selected unused image (with confirmation)
+- `R`: Remove all unused images (with confirmation)
+
+### Command Palette
+- `Ctrl+\`: Open command palette for quick access to all actions
 
 ### Log Viewer
 - Click and drag: Select text in log viewer
@@ -166,12 +173,16 @@ When no logs are found within the configured time range, dockerview will display
 - Container port mapping display
 - Split-pane log viewer with real-time log streaming
 - Container and stack management (start/stop/restart/recreate/down)
+- Docker image management: view usage, remove individual unused images, and prune all unused images
+- Docker images overview with container usage information
 - Docker volume management with stack associations
 - Docker network overview and management
 - Log filtering and auto-follow functionality
 - Text selection and clipboard support in log viewer
-- Status bar with detailed selection information
+- Status bar with detailed selection information and available actions
 - Visual feedback for container state transitions
+- Command palette for quick action access
+- Context-aware action availability (e.g., can't recreate without compose file)
 - Low system resource footprint
 - Cross-platform support (Linux, macOS, Windows)
 - Debug mode with detailed logging
@@ -280,11 +291,14 @@ Docker Engine <-> docker-py SDK <-> DockerManager (with threading) <-> UI Compon
 
 ### Key Components
 
-- **DockerViewApp**: Main Textual application class with keyboard bindings for container management
+- **DockerViewApp**: Main Textual application class coordinating UI and actions
+  - Uses **DockerActions** mixin for Docker operation handling
+  - Uses **RefreshActions** mixin for UI refresh management
+  - Provides command palette integration
 - **ContainerList**: Navigable list of containers with real-time stats, now with separate sections for Docker networks and Compose stacks
 - **StackHeader**: Collapsible headers for Docker Compose stacks
 - **NetworkHeader**: Separate section headers for Docker networks
-- **StatusBar**: Displays detailed information about the selected container or stack
+- **StatusBar**: Displays detailed information about the selected item with available actions
 - **DockerManager**: Handles direct Docker SDK integration with concurrent operations:
   - Thread-based non-blocking container operations
   - Parallel stats collection for all containers
@@ -293,7 +307,9 @@ Docker Engine <-> docker-py SDK <-> DockerManager (with threading) <-> UI Compon
   - Real-time filtering with proper empty filter handling
   - Session-based log streaming to prevent duplicates
   - Configurable time ranges and tail limits
-- **StateManager**: Dedicated state management component
+- **Action Mixins**: Modular action handling
+  - **DockerActions**: Container/stack operations with context awareness
+  - **RefreshActions**: UI refresh and data update management
 
 ## Development
 
@@ -395,12 +411,13 @@ To create a release:
   - `app.py`: Main application and UI layout
   - `docker_mgmt/`: Docker SDK integration layer
   - `ui/`: UI components organized by function:
+    - `actions/`: Modular action handlers (Docker operations, refresh)
     - `base/`: Base classes and interfaces
-    - `managers/`: Resource managers (stacks, networks, volumes)
+    - `managers/`: Resource managers (stacks, networks, volumes, images)
     - `viewers/`: Content viewers (log pane)
     - `dialogs/`: Modal dialogs and confirmations
-    - `widgets/`: Reusable UI components
-  - `utils/`: Utility modules (clipboard, time formatting)
+    - `widgets/`: Reusable UI components (headers, status bar)
+  - `utils/`: Utility modules (clipboard, time formatting, logging)
   - `config.py`: Configuration management
 - `tests/`: Unit tests
 - `pyproject.toml`: Poetry configuration and tool settings
