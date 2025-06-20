@@ -5,7 +5,7 @@ from typing import Dict, Optional, Set, Tuple
 
 from rich.text import Text
 from textual.containers import Container
-from textual.widgets import DataTable
+from textual.widgets import DataTable, Static
 
 from ..base.container_list_base import SelectionChanged
 
@@ -24,6 +24,7 @@ class ImageManager:
         self.parent = parent
         self.images_table: Optional[DataTable] = None
         self.images_container: Optional[Container] = None
+        self.loading_message: Optional[Static] = None
         self.image_rows: Dict[str, int] = {}  # Map image ID to row index
         self._images_in_new_data = set()
         self.selected_image_data: Optional[Dict] = None
@@ -41,6 +42,35 @@ class ImageManager:
         """Reset tracking for new data update."""
         self._images_in_new_data.clear()
 
+    def show_loading_message(self) -> None:
+        """Show a loading message in the images container."""
+        if self.parent.images_container and not self.loading_message:
+            self.loading_message = Static(
+                Text("Loading images, please wait...", style="dim italic"),
+                classes="loading-message",
+            )
+            self.loading_message.styles.width = "100%"
+            self.loading_message.styles.text_align = "center"
+            self.loading_message.styles.padding = (2, 0)
+            self.parent.images_container.mount(self.loading_message)
+
+    def hide_loading_message(self) -> None:
+        """Hide the loading message if it exists."""
+        if self.loading_message and self.loading_message.parent:
+            self.loading_message.remove()
+            self.loading_message = None
+
+    def show_no_images_message(self) -> None:
+        """Show a message when no images are found."""
+        if self.parent.images_container and not self.loading_message:
+            self.loading_message = Static(
+                Text("No images found", style="dim italic"), classes="no-images-message"
+            )
+            self.loading_message.styles.width = "100%"
+            self.loading_message.styles.text_align = "center"
+            self.loading_message.styles.padding = (2, 0)
+            self.parent.images_container.mount(self.loading_message)
+
     def prepare_new_containers(self) -> Dict[str, Tuple]:
         """Prepare new containers for mounting.
 
@@ -52,6 +82,8 @@ class ImageManager:
     def _initialize_table(self) -> None:
         """Initialize the images table within the images container."""
         if self.parent.images_container and not self._table_initialized:
+            # Hide loading message if it exists
+            self.hide_loading_message()
             # Create the images table with fixed rows to prevent scrolling
             self.images_table = DataTable(
                 show_cursor=True,
@@ -299,12 +331,20 @@ class ImageManager:
                 for img_data in self.parent._last_images_data.values():
                     if img_data["id"] == image_id:
                         self.selected_image_data = img_data
+                        # Also update parent's reference
+                        self.parent.selected_image_data = img_data
                         break
 
             # Focus the table row
             if self.images_table:
                 row_index = self.image_rows[image_id]
                 self.images_table.move_cursor(row=row_index)
+
+            # Post selection changed event
+            if self.selected_image_data:
+                self.parent.post_message(
+                    SelectionChanged("image", image_id, self.selected_image_data)
+                )
 
     def handle_selection(self, row_key) -> bool:
         """Handle selection of an image row.
@@ -334,19 +374,8 @@ class ImageManager:
             if not image_id:
                 return False
 
-            self.parent.selected_item = ("image", image_id)
-
-            # Find the image data from parent's data
-            if hasattr(self.parent, "_last_images_data"):
-                for img_data in self.parent._last_images_data.values():
-                    if img_data["id"] == image_id:
-                        self.selected_image_data = img_data
-                        break
-
-            # Notify about selection change
-            self.parent.post_message(
-                SelectionChanged("image", image_id, self.selected_image_data or {})
-            )
+            # Use the parent's select_image method which handles everything properly
+            self.parent.select_image(image_id)
             return True
         except Exception as e:
             logger.error(f"Error handling image selection: {e}")

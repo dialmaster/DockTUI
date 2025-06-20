@@ -142,8 +142,16 @@ class RefreshActions:
                     )
 
                 # Process all images next
-                for image_id, image_info in images.items():
-                    self.container_list.add_image(image_info)
+                if images:
+                    for image_id, image_info in images.items():
+                        self.container_list.add_image(image_info)
+                else:
+                    # No images found, show message if section is expanded
+                    if (
+                        not self.container_list.images_section_collapsed
+                        and self.container_list.images_container
+                    ):
+                        self.container_list.image_manager.show_no_images_message()
 
                 if self.container_list.image_manager._preserve_selected_image_id:
                     preserved_id = (

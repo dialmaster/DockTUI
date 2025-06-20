@@ -34,6 +34,12 @@ class ContainerListBase(VerticalScroll):
         padding: 0;
     }
 
+    .initial-loading-message {
+        background: transparent;
+        color: $text-muted;
+        text-style: italic;
+    }
+
     StackHeader {
         layout: horizontal;
         width: 100%;
@@ -223,7 +229,7 @@ class ContainerListBase(VerticalScroll):
 
         if self.images_section_header is None:
             self.images_section_header = SectionHeader(
-                "🖼️ DOCKER IMAGES", collapsed=self.images_section_collapsed
+                "📷 DOCKER IMAGES", collapsed=self.images_section_collapsed
             )
 
         if self.volumes_section_header is None:
