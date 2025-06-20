@@ -626,7 +626,7 @@ class ContainerList(ContainerListBase):
                         f"{tags_text}", Style(color="cyan", bold=True)
                     )
                 else:
-                    selection_text.append("<none>", Style(color="dim", bold=True))
+                    selection_text.append("<none>", Style(color="blue", bold=True))
                 selection_text.append(" | ", Style(color="white"))
                 selection_text.append(f"Containers: ", Style(color="white"))
                 selection_text.append(

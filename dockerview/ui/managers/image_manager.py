@@ -1,6 +1,7 @@
 """Image-specific functionality for the container list widget."""
 
 import logging
+from datetime import datetime
 from typing import Dict, Optional, Set, Tuple
 
 from rich.text import Text
@@ -446,59 +447,62 @@ class ImageManager:
         return None
 
     def sort_images_table(self) -> None:
-        """Sort the images table with unused images at the bottom."""
+        """Sort the images table:
+        1) Status (Active, Stopped, Unused)
+        2) Created (newest → oldest)
+        3) Image ID (lexicographic)
+        """
         if not self.images_table or self.images_table.row_count == 0:
             return
 
-        # Get all rows with their data
         rows_data = []
-
-        # Iterate through rows using their indices
         for row_idx in range(self.images_table.row_count):
             try:
-                # Get the row data directly by index
-                row_cells = []
-                for col_idx in range(len(self.images_table.columns)):
-                    cell_value = self.images_table.get_cell_at((row_idx, col_idx))
-                    row_cells.append(str(cell_value))
+                cells = [
+                    str(self.images_table.get_cell_at((row_idx, col_idx)))
+                    for col_idx in range(len(self.images_table.columns))
+                ]
 
-                # Find the image_id for this row
-                image_id = None
-                for img_id, stored_idx in self.image_rows.items():
-                    if stored_idx == row_idx:
-                        image_id = img_id
-                        break
-
-                if image_id and len(row_cells) >= 7:
-                    rows_data.append((image_id, tuple(row_cells)))
+                # Find the image_id mapped to this row index
+                image_id = next(
+                    (iid for iid, idx in self.image_rows.items() if idx == row_idx),
+                    None,
+                )
+                if image_id and len(cells) >= 7:
+                    rows_data.append((image_id, tuple(cells)))
             except Exception as e:
                 logger.debug(f"Error getting row data at index {row_idx}: {e}")
-                continue
 
-        # Sort by status first (Active, Stopped, Unused), then by repository name
+        def _created_ts(created: str) -> float:
+            """Convert 'YYYY-MM-DD' or ISO-8601 string to POSIX seconds.
+            Return 0 for unparsable or 'N/A' (treat as oldest)."""
+            if not created or created == "N/A":
+                return 0
+            try:
+                # Accept either full ISO or simple date
+                if "T" in created:
+                    return datetime.fromisoformat(created).timestamp()
+                return datetime.strptime(created, "%Y-%m-%d").timestamp()
+            except Exception:
+                return 0
+
         def sort_key(item):
-            image_id, row_data = item
-            repository = row_data[0]  # Repository is first column
-            status = row_data[6]  # Status is last column
+            image_id, cells = item
+            status = cells[6]
+            created = cells[4]
 
-            # Primary sort by status: Active (0), Stopped (1), Unused (2)
-            if status == "Active":
-                status_order = 0
-            elif status == "Stopped":
-                status_order = 1
-            else:  # Unused
-                status_order = 2
+            status_order = (
+                0 if status == "Active" else 1 if status == "Stopped" else 2  # Unused
+            )
 
-            # Secondary sort by repository name (alphabetical)
-            return (status_order, repository.lower())
+            # Negative timestamp → newest first
+            return (status_order, -_created_ts(created), image_id)
 
         rows_data.sort(key=sort_key)
 
-        # Clear all rows - use clear() which preserves columns
+        # Rebuild table
         self.images_table.clear(columns=False)
         self.image_rows.clear()
-
-        # Re-add all rows in sorted order
-        for idx, (image_id, row_data) in enumerate(rows_data):
-            self.images_table.add_row(*row_data, key=image_id)
+        for idx, (image_id, cells) in enumerate(rows_data):
+            self.images_table.add_row(*cells, key=image_id)
             self.image_rows[image_id] = idx
