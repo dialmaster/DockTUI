@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5](https://github.com/dialmaster/dockerview/compare/v0.1.4...v0.1.5) (2025-06-20)
+
+
+### Features
+
+* **images:** implement image removal functionality ([a43edb6](https://github.com/dialmaster/dockerview/commit/a43edb6edf3f204c7d2667a2118aa9c067ba03ad))
+* **ui:** add Docker images display with table view ([6888779](https://github.com/dialmaster/dockerview/commit/6888779e6e4feb4b34f73726107df4104848c087))
+* **ui:** add Docker images display with table view ([3e4df65](https://github.com/dialmaster/dockerview/commit/3e4df65b2bdf3e7386beeb6cf49004a425743335))
+
+
+### Bug Fixes
+
+* modal transparency ([efb1d66](https://github.com/dialmaster/dockerview/commit/efb1d6657bda60941a7f634511336428a57159b3))
+* regression bugs and ui improvements ([ed3c317](https://github.com/dialmaster/dockerview/commit/ed3c317ec2dbcb52390e03a5cc40098f6dceb4d4))
+* regression bugs and ui improvements ([2159318](https://github.com/dialmaster/dockerview/commit/21593181dd933f0500391aefb860d72454627c43))
+
+
+### Refactoring
+
+* better code organization and fix command palette ([e82e748](https://github.com/dialmaster/dockerview/commit/e82e748640b50f66246951bee4e1708c18e13924))
+
+
+### Documentation
+
+* Update README with updated project structure ([e5cddf6](https://github.com/dialmaster/dockerview/commit/e5cddf6c5caac911ad9675e32d3644298939208d))
+
 ## [0.1.4](https://github.com/dialmaster/dockerview/compare/v0.1.3...v0.1.4) (2025-06-18)
 
 
