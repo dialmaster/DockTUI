@@ -8,9 +8,11 @@ This is designed to replicate, somewhat, the main UI view from Docker Desktop.
 dockerview is a modern terminal user interface (TUI) for real-time monitoring and management of Docker containers and Docker Compose stacks. It provides an intuitive, keyboard-driven interface for viewing container status, resource usage, logs, and container management.
 
 ## Screenshots
+![dockerview_1](https://github.com/user-attachments/assets/f9936902-6240-414c-9530-65bfe1fbf457)
+![dockerview_2](https://github.com/user-attachments/assets/fc9f58e2-ca3a-4acb-ba52-932433326562)
+![dockerview_3](https://github.com/user-attachments/assets/68743925-7101-432f-90d3-c15df191515f)
+![docekrview_4](https://github.com/user-attachments/assets/6d8c8eb2-a03f-4474-b4cb-a5e0be33e806)
 
-![dockerview_shot1](https://github.com/user-attachments/assets/2aa27bdf-345f-43dd-9b03-28843ffb72a2)
-![dockerview_shot2](https://github.com/user-attachments/assets/87a61238-33d5-4f2a-9c17-58f3b34c5815)
 
 ## Quick Start
 
