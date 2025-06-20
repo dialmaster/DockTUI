@@ -1,5 +1,6 @@
 import logging
 import queue
+import re
 import threading
 from collections import deque
 
@@ -14,6 +15,21 @@ from ...config import config
 from ...utils.clipboard import copy_to_clipboard_async
 
 logger = logging.getLogger("dockerview.log_pane")
+
+# ANSI escape code pattern for stripping color codes
+ANSI_ESCAPE_PATTERN = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+
+
+def strip_ansi_codes(text: str) -> str:
+    """Strip ANSI escape codes from text.
+
+    Args:
+        text: The text containing ANSI codes
+
+    Returns:
+        The text with ANSI codes removed
+    """
+    return ANSI_ESCAPE_PATTERN.sub("", text)
 
 
 class LogTextArea(TextArea):
@@ -386,6 +402,9 @@ class LogPane(Vertical):
                     # Container was started, resume logs
                     self._handle_status_change(item_data)
                     return
+
+            # Update the stored data but don't restart logs for the same selection
+            self.current_item_data = item_data
             return
 
         # Update state
@@ -404,37 +423,19 @@ class LogPane(Vertical):
                 f"📋 Log Pane - Network: {item_data.get('name', item_id)}"
             )
             # Networks don't have logs, show a message
-            self.log_display.display = True
-            self.no_selection_display.display = False
-            self.log_display.clear()
-            self.log_display.text = (
-                "Networks do not have logs. Select a container or stack to view logs."
-            )
-            self.refresh()
+            self._show_no_logs_message_for_item_type("Networks")
             return
         elif item_type == "image":
             self.header.update(f"📋 Log Pane - Image: {item_id[:12]}")
             # Images don't have logs, show a message
-            self.log_display.display = True
-            self.no_selection_display.display = False
-            self.log_display.clear()
-            self.log_display.text = (
-                "Images do not have logs. Select a container or stack to view logs."
-            )
-            self.refresh()
+            self._show_no_logs_message_for_item_type("Images")
             return
         elif item_type == "volume":
             self.header.update(
                 f"📋 Log Pane - Volume: {item_data.get('name', item_id)}"
             )
             # Volumes don't have logs, show a message
-            self.log_display.display = True
-            self.no_selection_display.display = False
-            self.log_display.clear()
-            self.log_display.text = (
-                "Volumes do not have logs. Select a container or stack to view logs."
-            )
-            self.refresh()
+            self._show_no_logs_message_for_item_type("Volumes")
             return
         else:
             self.header.update("📋 Log Pane - Unknown Selection")
@@ -656,6 +657,8 @@ class LogPane(Vertical):
                 if isinstance(line, bytes):
                     line = line.decode("utf-8", errors="replace")
                 line = line.rstrip()
+                # Strip ANSI escape codes to prevent text selection issues
+                line = strip_ansi_codes(line)
 
                 if line:
                     line_count += 1
@@ -761,6 +764,8 @@ class LogPane(Vertical):
                         if isinstance(line, bytes):
                             line = line.decode("utf-8", errors="replace")
                         line = line.rstrip()
+                        # Strip ANSI escape codes to prevent text selection issues
+                        line = strip_ansi_codes(line)
 
                         if line:
                             # Prefix with container name for stack logs
@@ -1042,6 +1047,23 @@ class LogPane(Vertical):
 
         # Start logs again
         self._start_logs()
+
+    def _show_no_logs_message_for_item_type(self, item_type: str):
+        """Show a message for item types that don't have logs and handle the UI state.
+
+        Args:
+            item_type: The type of item (e.g., 'Networks', 'Images', 'Volumes')
+        """
+        self.log_display.display = True
+        self.no_selection_display.display = False
+        self.log_display.clear()
+        self.all_log_lines.clear()  # Clear the log buffer
+        self.log_display.text = (
+            f"{item_type} do not have logs. Select a container or stack to view logs."
+        )
+        # Stop any existing log streaming
+        self._stop_logs_async()
+        self.refresh()
 
     def action_copy_selection(self):
         """Copy the selected text to the clipboard."""

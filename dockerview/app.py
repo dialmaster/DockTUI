@@ -384,20 +384,18 @@ class DockerViewApp(App, DockerActions, RefreshActions):
             "none": [],
         }
 
-        if action == "quit":
+        # Always allow system actions
+        if action in ("quit", "command_palette"):
             return True
 
+        # For Docker-specific actions, check if they apply to current selection
         selection_type = self._current_selection_type
 
         if not selection_type or selection_type not in SELECTION_ACTIONS:
             return False
 
         available_actions = SELECTION_ACTIONS[selection_type]
-
-        if action in available_actions:
-            return True
-        else:
-            return False
+        return action in available_actions
 
     def on_selection_changed(self, event: SelectionChanged) -> None:
         """Handle selection changes from the container list.
