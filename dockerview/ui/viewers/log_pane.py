@@ -9,7 +9,7 @@ from rich.text import Text
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
 from textual.events import MouseDown
-from textual.widgets import Checkbox, Input, Label, Select, Static, TextArea
+from textual.widgets import Button, Checkbox, Input, Label, Select, Static, TextArea
 
 from ...config import config
 from ...utils.clipboard import copy_to_clipboard_async
@@ -121,11 +121,11 @@ class LogPane(Vertical):
     }
 
     .log-controls-search {
-        height: 4;
-        max-height: 4 !important;
+        height: 5;
+        max-height: 5 !important;
         padding: 0 1;
         background: $surface;
-        margin-top: 6;
+        margin-top: 1;
         dock: top;
     }
 
@@ -183,16 +183,23 @@ class LogPane(Vertical):
     }
 
     #search-input {
-        width: 70%;
+        width: 50%;
         height: 3;
         margin: 0 1 0 0;
     }
 
     #auto-follow-checkbox {
-        width: 30%;
+        width: 20%;
         height: 3;
         padding: 0 1;
         content-align: center middle;
+    }
+
+    #mark-position-button {
+        width: auto;
+        min-width: 15;
+        height: 3;
+        margin: 0 1;
     }
     """
 
@@ -243,6 +250,7 @@ class LogPane(Vertical):
         self.no_selection_display = None
         self.search_input = None
         self.auto_follow_checkbox = None
+        self.mark_position_button = None
         self.content_container = None
         self.tail_select = None
         self.since_select = None
@@ -259,6 +267,9 @@ class LogPane(Vertical):
         self.search_input = Input(placeholder="Filter logs...", id="search-input")
         self.auto_follow_checkbox = Checkbox(
             "Auto-follow", self.auto_follow, id="auto-follow-checkbox"
+        )
+        self.mark_position_button = Button(
+            "Mark position", id="mark-position-button", variant="primary"
         )
 
         # Create dropdown options for log settings
@@ -348,9 +359,12 @@ class LogPane(Vertical):
             classes="log-controls",
         )
 
-        # Second control row - search and auto-follow
+        # Second control row - search, auto-follow, and mark position
         yield Horizontal(
-            self.search_input, self.auto_follow_checkbox, classes="log-controls-search"
+            self.search_input,
+            self.auto_follow_checkbox,
+            self.mark_position_button,
+            classes="log-controls-search",
         )
 
         # Content container that will expand to fill space
@@ -1096,3 +1110,37 @@ class LogPane(Vertical):
         """Select all text in the log display."""
         if self.log_display.display:
             self.log_display.select_all()
+
+    def on_button_pressed(self, event):
+        """Handle button presses."""
+        if event.button.id == "mark-position-button":
+            self._mark_position()
+
+    def _mark_position(self):
+        """Add a timestamp marker to the log display."""
+        if self.log_display.display:
+            from datetime import datetime
+
+            # Get current timestamp
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            marker = f"\n\n------ MARKED {timestamp} ------\n\n"
+
+            # Add to all_log_lines for persistence through filtering
+            self.all_log_lines.append(marker.strip())
+
+            # Add to display if no filter or if filter matches
+            if not self.search_filter or self.search_filter.lower() in marker.lower():
+                # Move cursor to end and insert the marker
+                self.log_display.move_cursor(self.log_display.document.end)
+                self.log_display.insert(marker)
+
+                # Auto-scroll if enabled
+                if self.auto_follow:
+                    self.log_display.scroll_cursor_visible()
+
+            # Show notification
+            self.app.notify(
+                f"Position marked at {timestamp}",
+                severity="information",
+                timeout=2,
+            )
