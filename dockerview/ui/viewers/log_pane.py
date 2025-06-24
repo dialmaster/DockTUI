@@ -106,8 +106,8 @@ class LogPane(Vertical):
     }
 
     .log-controls {
-        height: 5;
-        max-height: 5 !important;
+        height: 6;
+        max-height: 6 !important;
         padding-top: 1;
         padding-bottom: 1;
         background: $surface;
@@ -121,11 +121,11 @@ class LogPane(Vertical):
     }
 
     .log-controls-search {
-        height: 5;
-        max-height: 5 !important;
+        height: 4;
+        max-height: 4 !important;
         padding: 0 1;
         background: $surface;
-        margin-top: 1;
+        margin-top: 6;
         dock: top;
     }
 
@@ -171,27 +171,37 @@ class LogPane(Vertical):
     }
 
     #tail-select {
-        width: 40%;
+        width: 22;
         height: 3;
         margin: 0 1 0 0;
     }
 
     #since-select {
-        width: 40%;
+        width: 22;
         height: 3;
         margin: 0 1 0 0;
     }
 
     #search-input {
-        width: 50%;
+        width: 40%;
+        max-width: 30;
         height: 3;
-        margin: 0 1 0 0;
+        margin-left: 1;
+        margin-right: 0;
+        margin-top: 0;
+        margin-bottom: 0;
     }
 
     #auto-follow-checkbox {
         width: 20%;
+        min-width: 15;
+        max-width: 15;
         height: 3;
         padding: 0 1;
+        margin-left: 1;
+        margin-right: 0;
+        margin-top: 0;
+        margin-bottom: 0;
         content-align: center middle;
     }
 
@@ -199,7 +209,10 @@ class LogPane(Vertical):
         width: auto;
         min-width: 15;
         height: 3;
-        margin: 0 1;
+        margin-left: 1;
+        margin-right: 0;
+        margin-top: 0;
+        margin-bottom: 0;
     }
     """
 
@@ -266,10 +279,10 @@ class LogPane(Vertical):
         # Create search and auto-follow controls
         self.search_input = Input(placeholder="Filter logs...", id="search-input")
         self.auto_follow_checkbox = Checkbox(
-            "Auto-follow", self.auto_follow, id="auto-follow-checkbox"
+            "Follow", self.auto_follow, id="auto-follow-checkbox"
         )
         self.mark_position_button = Button(
-            "Mark position", id="mark-position-button", variant="primary"
+            "Mark Log", id="mark-position-button", variant="primary"
         )
 
         # Create dropdown options for log settings
@@ -671,10 +684,15 @@ class LogPane(Vertical):
                 if isinstance(line, bytes):
                     line = line.decode("utf-8", errors="replace")
                 line = line.rstrip()
+
+                # Check if line was empty before ANSI stripping
+                was_empty_before_ansi = not line
+
                 # Strip ANSI escape codes to prevent text selection issues
                 line = strip_ansi_codes(line)
 
-                if line:
+                # Include the line if it was originally not empty OR if it was empty before ANSI stripping
+                if line or was_empty_before_ansi:
                     line_count += 1
                     self.log_queue.put((session_id, "log", line))
 
@@ -778,10 +796,15 @@ class LogPane(Vertical):
                         if isinstance(line, bytes):
                             line = line.decode("utf-8", errors="replace")
                         line = line.rstrip()
+
+                        # Check if line was empty before ANSI stripping
+                        was_empty_before_ansi = not line
+
                         # Strip ANSI escape codes to prevent text selection issues
                         line = strip_ansi_codes(line)
 
-                        if line:
+                        # Include the line if it was originally not empty OR if it was empty before ANSI stripping
+                        if line or was_empty_before_ansi:
                             # Prefix with container name for stack logs
                             prefixed_line = f"[{name}] {line}"
                             combined_queue.put(prefixed_line)
@@ -987,7 +1010,13 @@ class LogPane(Vertical):
 
         # Set all filtered lines at once
         if filtered_lines:
-            self.log_display.text = "\n".join(filtered_lines) + "\n"
+            # Reconstruct the text exactly as it was originally displayed
+            # Each line should end with a newline, including empty lines
+            text_parts = []
+            for line in filtered_lines:
+                text_parts.append(line)
+                text_parts.append("\n")
+            self.log_display.text = "".join(text_parts)
         elif self.search_filter and len(self.all_log_lines) > 0:
             # If we have a filter and no lines match, show a message
             self.log_display.text = "No log lines match filter"
@@ -1123,16 +1152,24 @@ class LogPane(Vertical):
 
             # Get current timestamp
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            marker = f"\n\n------ MARKED {timestamp} ------\n\n"
+            marker_text = f"------ MARKED {timestamp} ------"
 
             # Add to all_log_lines for persistence through filtering
-            self.all_log_lines.append(marker.strip())
+            # Add empty lines and marker as separate entries to preserve formatting
+            self.all_log_lines.append("")  # Empty line before marker
+            self.all_log_lines.append("")  # Another empty line before marker
+            self.all_log_lines.append(marker_text)
+            self.all_log_lines.append("")  # Empty line after marker
+            self.all_log_lines.append("")  # Another empty line after marker
 
-            # Add to display if no filter or if filter matches
-            if not self.search_filter or self.search_filter.lower() in marker.lower():
-                # Move cursor to end and insert the marker
+            # Add to display if no filter or if filter matches the marker
+            if (
+                not self.search_filter
+                or self.search_filter.lower() in marker_text.lower()
+            ):
+                # Move cursor to end and insert the marker with surrounding empty lines
                 self.log_display.move_cursor(self.log_display.document.end)
-                self.log_display.insert(marker)
+                self.log_display.insert(f"\n\n{marker_text}\n\n")
 
                 # Auto-scroll if enabled
                 if self.auto_follow:
