@@ -58,7 +58,22 @@ jobs:
 
     - name: Run pytest with coverage
       run: |
-        poetry run pytest -v --cov=dockerview --cov-report=xml --cov-report=term-missing
+        poetry run pytest -v --cov=dockerview --cov-report=xml --cov-report=term-missing --cov-report=json
+
+    - name: Generate coverage report
+      if: always()
+      run: |
+        echo "## Coverage Report" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Overall Coverage" >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        poetry run coverage report >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Per-File Coverage" >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        poetry run coverage report --skip-covered --sort=cover >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
 
     - name: Coverage comment
       uses: py-cov-action/python-coverage-comment-action@v3
@@ -67,6 +82,7 @@ jobs:
         GITHUB_TOKEN: ${{ github.token }}
         MINIMUM_GREEN: 80
         MINIMUM_ORANGE: 60
+        VERBOSE: true
 
     - name: Check for Python syntax errors or undefined names
       run: |
