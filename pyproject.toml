@@ -52,6 +52,7 @@ addopts = "-v --tb=short"
 [tool.coverage.run]
 source = ["dockerview"]
 omit = ["*/tests/*", "*/__init__.py", "*/__main__.py"]
+relative_files = true
 
 [tool.coverage.report]
 exclude_lines = [
