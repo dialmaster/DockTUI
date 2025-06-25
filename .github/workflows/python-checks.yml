@@ -83,6 +83,8 @@ jobs:
         MINIMUM_GREEN: 80
         MINIMUM_ORANGE: 60
         VERBOSE: true
+        MAX_FILES_IN_COMMENT: 50
+        ANNOTATE_MISSING_LINES: true
 
     - name: Check for Python syntax errors or undefined names
       run: |
