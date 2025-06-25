@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.6](https://github.com/dialmaster/dockerview/compare/v0.1.5...v0.1.6) (2025-06-25)
+
+
+### Features
+
+* **logs:** Add ability to mark current position in logs ([cd0c5f1](https://github.com/dialmaster/dockerview/commit/cd0c5f15cf350b0e98d0eafcadfb6b5bd199b10d))
+* **logs:** Add ability to mark current position in logs ([5f9c508](https://github.com/dialmaster/dockerview/commit/5f9c5087f2702718986bc04004a21326e338f63c))
+
+
+### Bug Fixes
+
+* images ui ([5a89bbe](https://github.com/dialmaster/dockerview/commit/5a89bbe19ae4be985d83c46749339fcfa15e09b3))
+* images ui ([dc3d0a6](https://github.com/dialmaster/dockerview/commit/dc3d0a68d36c0790fac6395b3355aa7a8e2594bb))
+* **logs:** fix styling for mark logs ([672947e](https://github.com/dialmaster/dockerview/commit/672947e835411977e87a202d74815b3652b44c12))
+
+
+### Refactoring
+
+* extract log services from LogPane into separate modules ([2c0ab5d](https://github.com/dialmaster/dockerview/commit/2c0ab5d64991fdef82b4fe6c844cea33d85358d8))
+
 ## [0.1.5](https://github.com/dialmaster/dockerview/compare/v0.1.4...v0.1.5) (2025-06-20)
 
 
