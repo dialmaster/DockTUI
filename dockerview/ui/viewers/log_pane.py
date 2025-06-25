@@ -1,77 +1,19 @@
 import logging
 import queue
-import re
-import threading
-from collections import deque
 
 import docker
 from rich.text import Text
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
-from textual.events import MouseDown
-from textual.widgets import Checkbox, Input, Label, Select, Static, TextArea
+from textual.widgets import Button, Checkbox, Input, Label, Select, Static
 
 from ...config import config
+from ...services.log_filter import LogFilter
+from ...services.log_streamer import LogStreamer
 from ...utils.clipboard import copy_to_clipboard_async
+from ..widgets.log_text_area import LogTextArea
 
 logger = logging.getLogger("dockerview.log_pane")
-
-# ANSI escape code pattern for stripping color codes
-ANSI_ESCAPE_PATTERN = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
-
-
-def strip_ansi_codes(text: str) -> str:
-    """Strip ANSI escape codes from text.
-
-    Args:
-        text: The text containing ANSI codes
-
-    Returns:
-        The text with ANSI codes removed
-    """
-    return ANSI_ESCAPE_PATTERN.sub("", text)
-
-
-class LogTextArea(TextArea):
-    """Custom TextArea that handles right-click to copy."""
-
-    def on_mouse_down(self, event: MouseDown) -> None:
-        """Handle mouse down events for right-click copy."""
-        if event.button == 3:
-            # Check if there's selected text
-            selection = self.selected_text
-            if selection:
-                # Define callback to show notification from main thread
-                def on_copy_complete(success):
-                    if success:
-                        logger.info(
-                            f"Copied {len(selection)} characters to clipboard via right-click"
-                        )
-                        # Use call_from_thread to ensure notification happens on main thread
-                        self.app.call_from_thread(
-                            self.app.notify,
-                            "Text copied to clipboard",
-                            severity="information",
-                            timeout=1,
-                        )
-                    else:
-                        logger.error("Failed to copy to clipboard")
-                        # Show error notification from main thread
-                        self.app.call_from_thread(
-                            self.app.notify,
-                            "Failed to copy to clipboard. Please install xclip or pyperclip.",
-                            severity="error",
-                            timeout=3,
-                        )
-
-                # Copy in background thread
-                copy_to_clipboard_async(selection, on_copy_complete)
-                # Prevent the right-click from starting a new selection
-                return
-
-        # For non-right-clicks, check if parent has the method before calling it
-        if hasattr(super(), "on_mouse_down"):
-            super().on_mouse_down(event)
 
 
 class LogPane(Vertical):
@@ -81,6 +23,32 @@ class LogPane(Vertical):
         # Use different keybinding to avoid conflict with app's Ctrl+C (quit)
         Binding("ctrl+shift+c", "copy_selection", "Copy selected text", show=False),
         Binding("ctrl+a", "select_all", "Select all text", show=False),
+    ]
+
+    # Dropdown options configuration
+    TAIL_OPTIONS = [
+        ("50 lines", "50"),
+        ("100 lines", "100"),
+        ("200 lines", "200"),
+        ("400 lines", "400"),
+        ("800 lines", "800"),
+        ("1600 lines", "1600"),
+        ("3200 lines", "3200"),
+        ("6400 lines", "6400"),
+        ("12800 lines", "12800"),
+    ]
+
+    SINCE_OPTIONS = [
+        ("5 minutes", "5m"),
+        ("10 minutes", "10m"),
+        ("15 minutes", "15m"),
+        ("30 minutes", "30m"),
+        ("1 hour", "1h"),
+        ("2 hours", "2h"),
+        ("4 hours", "4h"),
+        ("8 hours", "8h"),
+        ("24 hours", "24h"),
+        ("48 hours", "48h"),
     ]
 
     DEFAULT_CSS = """
@@ -106,8 +74,8 @@ class LogPane(Vertical):
     }
 
     .log-controls {
-        height: 5;
-        max-height: 5 !important;
+        height: 6;
+        max-height: 6 !important;
         padding-top: 1;
         padding-bottom: 1;
         background: $surface;
@@ -171,28 +139,48 @@ class LogPane(Vertical):
     }
 
     #tail-select {
-        width: 40%;
+        width: 22;
         height: 3;
         margin: 0 1 0 0;
     }
 
     #since-select {
-        width: 40%;
+        width: 22;
         height: 3;
         margin: 0 1 0 0;
     }
 
     #search-input {
-        width: 70%;
+        width: 40%;
+        max-width: 30;
         height: 3;
-        margin: 0 1 0 0;
+        margin-left: 1;
+        margin-right: 0;
+        margin-top: 0;
+        margin-bottom: 0;
     }
 
     #auto-follow-checkbox {
-        width: 30%;
+        width: 20%;
+        min-width: 15;
+        max-width: 15;
         height: 3;
         padding: 0 1;
+        margin-left: 1;
+        margin-right: 0;
+        margin-top: 0;
+        margin-bottom: 0;
         content-align: center middle;
+    }
+
+    #mark-position-button {
+        width: auto;
+        min-width: 15;
+        height: 3;
+        margin-left: 1;
+        margin-right: 0;
+        margin-top: 0;
+        margin-bottom: 0;
     }
     """
 
@@ -203,15 +191,10 @@ class LogPane(Vertical):
         # State management
         self.current_item = None  # ("container", id) or ("stack", name)
         self.current_item_data = None
-        self.search_filter = ""
         self.auto_follow = True
 
-        # Performance optimization: Use deque with maxlen to cap memory usage
-        self.MAX_LINES = config.get("log.max_lines", 2000)
-        self.all_log_lines = deque(
-            maxlen=self.MAX_LINES
-        )  # Store all log lines for filtering
-        self.filtered_line_count = 0  # Track number of lines matching filter
+        # Log filtering
+        self.log_filter = LogFilter(max_lines=config.get("log.max_lines", 2000))
 
         # Log tail and since configuration
         self.LOG_TAIL = str(config.get("log.tail", 200))
@@ -223,6 +206,9 @@ class LogPane(Vertical):
         self.showing_no_logs_message = (
             False  # Track when we're showing the "no logs found" message
         )
+        self.showing_loading_message = (
+            False  # Track when showing "Loading logs..." message
+        )
 
         # Docker client for SDK streaming
         try:
@@ -231,11 +217,11 @@ class LogPane(Vertical):
             logger.error(f"Failed to initialize Docker client: {e}")
             self.docker_client = None
 
-        # Threading for log streaming
-        self.log_thread = None
-        self.log_queue = queue.Queue()
-        self.stop_event = threading.Event()
-        self.log_session_id = 0  # Track log sessions to prevent mixing old/new logs
+        # Log streaming
+        self.log_streamer = (
+            LogStreamer(self.docker_client) if self.docker_client else None
+        )
+        self.current_session_id = 0
 
         # UI components
         self.header = None
@@ -243,6 +229,7 @@ class LogPane(Vertical):
         self.no_selection_display = None
         self.search_input = None
         self.auto_follow_checkbox = None
+        self.mark_position_button = None
         self.content_container = None
         self.tail_select = None
         self.since_select = None
@@ -258,57 +245,15 @@ class LogPane(Vertical):
         # Create search and auto-follow controls
         self.search_input = Input(placeholder="Filter logs...", id="search-input")
         self.auto_follow_checkbox = Checkbox(
-            "Auto-follow", self.auto_follow, id="auto-follow-checkbox"
+            "Follow", self.auto_follow, id="auto-follow-checkbox"
         )
-
-        # Create dropdown options for log settings
-        tail_options = [
-            ("50 lines", "50"),
-            ("100 lines", "100"),
-            ("200 lines", "200"),
-            ("400 lines", "400"),
-            ("800 lines", "800"),
-            ("1600 lines", "1600"),
-            ("3200 lines", "3200"),
-            ("6400 lines", "6400"),
-            ("12800 lines", "12800"),
-        ]
-
-        since_options = [
-            ("5 minutes", "5m"),
-            ("10 minutes", "10m"),
-            ("15 minutes", "15m"),
-            ("30 minutes", "30m"),
-            ("1 hour", "1h"),
-            ("2 hours", "2h"),
-            ("4 hours", "4h"),
-            ("8 hours", "8h"),
-            ("24 hours", "24h"),
-            ("48 hours", "48h"),
-        ]
+        self.mark_position_button = Button(
+            "Mark Log", id="mark-position-button", variant="primary"
+        )
 
         # Create dropdowns with current values selected
-        # If current value is not in options, add it
-        if not any(opt[1] == self.LOG_TAIL for opt in tail_options):
-            tail_options.insert(0, (f"{self.LOG_TAIL} lines", self.LOG_TAIL))
-
-        self.tail_select = Select(
-            options=tail_options,
-            value=self.LOG_TAIL,
-            id="tail-select",
-            classes="log-setting",
-        )
-
-        # If current value is not in options, add it
-        if not any(opt[1] == self.LOG_SINCE for opt in since_options):
-            since_options.insert(0, (f"{self.LOG_SINCE}", self.LOG_SINCE))
-
-        self.since_select = Select(
-            options=since_options,
-            value=self.LOG_SINCE,
-            id="since-select",
-            classes="log-setting",
-        )
+        self.tail_select = self._create_tail_select()
+        self.since_select = self._create_since_select()
 
         # Create the no-selection display
         self.no_selection_display = Static(
@@ -348,9 +293,12 @@ class LogPane(Vertical):
             classes="log-controls",
         )
 
-        # Second control row - search and auto-follow
+        # Second control row - search, auto-follow, and mark position
         yield Horizontal(
-            self.search_input, self.auto_follow_checkbox, classes="log-controls-search"
+            self.search_input,
+            self.auto_follow_checkbox,
+            self.mark_position_button,
+            classes="log-controls-search",
         )
 
         # Content container that will expand to fill space
@@ -367,7 +315,8 @@ class LogPane(Vertical):
 
     def on_unmount(self):
         """Clean up when unmounting."""
-        self._stop_logs()
+        if self.log_streamer:
+            self.log_streamer.stop_streaming(wait=True)
         if self.queue_timer:
             self.queue_timer.stop()
 
@@ -388,17 +337,17 @@ class LogPane(Vertical):
                 new_status = item_data.get("status", "").lower()
 
                 # Check if container stopped
-                if ("running" in old_status or "up" in old_status) and (
-                    "exited" in new_status or "stopped" in new_status
-                ):
+                if self._is_container_running(
+                    old_status
+                ) and self._is_container_stopped(new_status):
                     # Container was stopped, update the display
                     self._handle_status_change(item_data)
                     return
 
                 # Check if container started
-                elif ("exited" in old_status or "stopped" in old_status) and (
-                    "running" in new_status or "up" in new_status
-                ):
+                elif self._is_container_stopped(
+                    old_status
+                ) and self._is_container_running(new_status):
                     # Container was started, resume logs
                     self._handle_status_change(item_data)
                     return
@@ -411,60 +360,39 @@ class LogPane(Vertical):
         self.current_item = (item_type, item_id)
         self.current_item_data = item_data
 
-        # Update header
-        if item_type == "container":
-            self.header.update(
-                f"📋 Log Pane - Container: {item_data.get('name', item_id)}"
-            )
-        elif item_type == "stack":
-            self.header.update(f"📋 Log Pane - Stack: {item_data.get('name', item_id)}")
-        elif item_type == "network":
-            self.header.update(
-                f"📋 Log Pane - Network: {item_data.get('name', item_id)}"
-            )
-            # Networks don't have logs, show a message
-            self._show_no_logs_message_for_item_type("Networks")
-            return
-        elif item_type == "image":
-            self.header.update(f"📋 Log Pane - Image: {item_id[:12]}")
-            # Images don't have logs, show a message
-            self._show_no_logs_message_for_item_type("Images")
-            return
-        elif item_type == "volume":
-            self.header.update(
-                f"📋 Log Pane - Volume: {item_data.get('name', item_id)}"
-            )
-            # Volumes don't have logs, show a message
-            self._show_no_logs_message_for_item_type("Volumes")
-            return
-        else:
-            self.header.update("📋 Log Pane - Unknown Selection")
+        # Update header and check if item type has logs
+        if not self._update_header_for_item(item_type, item_id, item_data):
+            return  # Item type doesn't have logs
 
         # Show log display, hide no-selection display
-        self.log_display.display = True
-        self.no_selection_display.display = False
+        self._show_logs_ui()
 
         # Clear previous logs and stored lines
-        self.log_display.clear()
-        self.all_log_lines.clear()  # Clear the deque
-        self.filtered_line_count = 0
-        self.showing_no_logs_message = False  # Reset when clearing logs
+        self._clear_logs()
 
         # Check if this is a container and if it's not running - do this BEFORE stopping logs
         if item_type == "container" and item_data.get("status"):
-            status = item_data["status"].lower()
-            if "exited" in status or "stopped" in status or "created" in status:
+            if self._is_container_stopped(item_data["status"]):
                 # Container is not running, show appropriate message immediately
                 self.log_display.text = f"Container '{item_data.get('name', item_id)}' is not running.\nStatus: {item_data['status']}"
                 # Stop any existing log streaming (non-blocking)
-                self._stop_logs_async()
+                if self.log_streamer:
+                    self.log_streamer.stop_streaming(wait=False)
                 return
 
-        # Show loading message immediately
-        self.log_display.text = f"Loading logs for {item_type}: {item_id}...\n"
+        # Show loading message immediately, but only if no filter is active
+        # If a filter is active, we'll wait to see if any lines match before showing anything
+        if not self.log_filter.has_filter():
+            self.log_display.text = f"Loading logs for {item_type}: {item_id}...\n"
+            self.showing_loading_message = True
+        else:
+            # Clear display but don't show loading message yet when filter is active
+            self.log_display.clear()
+            self.showing_loading_message = False
 
         # Stop any existing log streaming asynchronously to avoid blocking
-        self._stop_logs_async()
+        if self.log_streamer:
+            self.log_streamer.stop_streaming(wait=False)
 
         # Start streaming logs without refresh to avoid blocking
         self._start_logs()
@@ -473,7 +401,8 @@ class LogPane(Vertical):
         """Clear the current selection and show the no-selection state."""
 
         # Stop any existing log streaming
-        self._stop_logs()
+        if self.log_streamer:
+            self.log_streamer.stop_streaming(wait=True)
 
         # Clear state
         self.current_item = None
@@ -483,12 +412,10 @@ class LogPane(Vertical):
         self.header.update("📋 Log Pane - No Selection")
 
         # Hide log display, show no-selection display
-        self.log_display.display = False
-        self.no_selection_display.display = True
+        self._show_no_selection_ui()
 
         # Clear logs and stored lines
-        self.log_display.clear()
-        self.all_log_lines.clear()  # Clear the deque
+        self._clear_logs()
 
         # Refresh to ensure visibility changes take effect
         self.refresh()
@@ -499,25 +426,23 @@ class LogPane(Vertical):
         Args:
             item_data: Updated container data with new status
         """
-        # Stop any existing log streaming
-        self._stop_logs()
+        # Stop any existing log streaming without blocking UI
+        if self.log_streamer:
+            self.log_streamer.stop_streaming(wait=False)
 
         # Update stored data
         self.current_item_data = item_data
 
         # Clear previous logs
-        self.log_display.clear()
-        self.all_log_lines.clear()  # Clear the deque
-        self.filtered_line_count = 0
-        self.showing_no_logs_message = False  # Reset when status changes
+        self._clear_logs()
 
-        status = item_data.get("status", "").lower()
+        status = item_data.get("status", "")
 
-        if "exited" in status or "stopped" in status or "created" in status:
+        if self._is_container_stopped(status):
             # Container is not running, show message
             self.log_display.text = f"Container '{item_data.get('name', self.current_item[1])}' is not running.\nStatus: {item_data['status']}"
             self.refresh()
-        elif "running" in status or "up" in status:
+        elif self._is_container_running(status):
             # Container is running, start streaming logs
             self.log_display.clear()
             self.log_display.text = f"Container '{item_data.get('name', self.current_item[1])}' started. Loading logs...\n"
@@ -529,290 +454,46 @@ class LogPane(Vertical):
             logger.warning("_start_logs called but no current_item")
             return
 
-        item_type, item_id = self.current_item
+        if not self.log_streamer:
+            logger.error("Log streamer not available")
+            return
 
-        # Increment session ID to distinguish this log stream from previous ones
-        self.log_session_id += 1
-        current_session_id = self.log_session_id
+        item_type, item_id = self.current_item
 
         # Note: Loading message is already shown in update_selection()
         self.waiting_for_logs = True
         self.initial_log_check_done = False
         self.showing_no_logs_message = False  # Reset the flag when starting new logs
 
-        # Clear stop event for the new thread
-        self.stop_event.clear()
-        self.log_thread = threading.Thread(
-            target=self._log_worker, args=(current_session_id,), daemon=True
+        # Start streaming logs
+        self.current_session_id = self.log_streamer.start_streaming(
+            item_type=item_type,
+            item_id=item_id,
+            item_data=self.current_item_data,
+            tail=self.LOG_TAIL,
+            since=self.LOG_SINCE,
         )
-        self.log_thread.start()
-
-    def _stop_logs(self):
-        """Stop the current log streaming."""
-
-        # Signal the thread to stop
-        self.stop_event.set()
-
-        # Wait for the thread to finish
-        if self.log_thread and self.log_thread.is_alive():
-            self.log_thread.join(timeout=2)
-
-        # Clear the queue
-        while not self.log_queue.empty():
-            try:
-                self.log_queue.get_nowait()
-            except queue.Empty:
-                break
-
-    def _stop_logs_async(self):
-        """Stop the current log streaming without blocking."""
-        # Signal the thread to stop
-        self.stop_event.set()
-
-        # Clear the queue without waiting for thread
-        while not self.log_queue.empty():
-            try:
-                self.log_queue.get_nowait()
-            except queue.Empty:
-                break
-
-    def _log_worker(self, session_id):
-        """Worker thread that reads Docker logs and puts them in the queue.
-
-        Args:
-            session_id: The session ID for this log stream
-        """
-        item_type, item_id = self.current_item if self.current_item else (None, None)
-
-        if not self.docker_client:
-            self.log_queue.put((session_id, "error", "Docker client not available"))
-            return
-
-        try:
-            if item_type == "container":
-                # Stream logs for a single container
-                self._stream_container_logs(item_id, session_id)
-            elif item_type == "stack":
-                # Stream logs for all containers in a stack
-                self._stream_stack_logs(session_id)
-            else:
-                self.log_queue.put(
-                    (session_id, "error", f"Unknown item type: {item_type}")
-                )
-        except Exception as e:
-            logger.error(f"Error in log worker: {e}", exc_info=True)
-            self.log_queue.put((session_id, "error", f"Error streaming logs: {str(e)}"))
-
-    def _stream_container_logs(self, container_id, session_id):
-        """Stream logs for a single container using Docker SDK.
-
-        Args:
-            container_id: The container ID
-            session_id: The session ID for this log stream
-        """
-        try:
-            container = self.docker_client.containers.get(container_id)
-
-            # Convert tail and since parameters
-            tail = int(self.LOG_TAIL)
-
-            # Convert since parameter to proper format
-            # Docker SDK expects since as datetime or Unix timestamp
-            since = self._convert_since_to_timestamp(self.LOG_SINCE)
-
-            # First, quickly check if there are any logs without following
-            initial_logs = container.logs(
-                stream=False,
-                follow=False,
-                tail=1,  # Just check for one line
-                since=since,
-                stdout=True,
-                stderr=True,
-                timestamps=False,
-            )
-
-            # If no logs found initially, show message quickly
-            if not initial_logs or not initial_logs.strip():
-                self._check_no_logs_found()
-                # Still continue to stream in case new logs appear
-
-            # Now stream logs with follow
-            log_stream = container.logs(
-                stream=True,
-                follow=True,
-                tail=tail,
-                since=since,
-                stdout=True,
-                stderr=True,
-                timestamps=False,
-            )
-
-            line_count = 0
-
-            for line in log_stream:
-                if self.stop_event.is_set():
-                    break
-
-                # Decode and strip the line
-                if isinstance(line, bytes):
-                    line = line.decode("utf-8", errors="replace")
-                line = line.rstrip()
-                # Strip ANSI escape codes to prevent text selection issues
-                line = strip_ansi_codes(line)
-
-                if line:
-                    line_count += 1
-                    self.log_queue.put((session_id, "log", line))
-
-        except docker.errors.NotFound:
-            self.log_queue.put(
-                (session_id, "error", f"Container {container_id} not found")
-            )
-        except Exception as e:
-            logger.error(f"Error streaming container logs: {e}", exc_info=True)
-            raise
-
-    def _stream_stack_logs(self, session_id):
-        """Stream logs for all containers in a stack using Docker SDK.
-
-        Args:
-            session_id: The session ID for this log stream
-        """
-        try:
-            stack_name = self.current_item_data.get("name", self.current_item[1])
-
-            # Get all containers for this stack
-            containers = self.docker_client.containers.list(
-                all=True, filters={"label": f"com.docker.compose.project={stack_name}"}
-            )
-
-            # Remove any duplicate containers (shouldn't happen, but just in case)
-            seen_ids = set()
-            unique_containers = []
-            for container in containers:
-                if container.id not in seen_ids:
-                    seen_ids.add(container.id)
-                    unique_containers.append(container)
-            containers = unique_containers
-
-            if not containers:
-                self.log_queue.put(
-                    (session_id, "error", f"No containers found for stack {stack_name}")
-                )
-                return
-
-            # Create log streams for all containers
-            log_streams = []
-            for container in containers:
-                try:
-                    # Convert tail and since parameters
-                    tail = int(self.LOG_TAIL)
-                    since = self._convert_since_to_timestamp(self.LOG_SINCE)
-
-                    log_stream = container.logs(
-                        stream=True,
-                        follow=True,
-                        tail=tail,
-                        since=since,
-                        stdout=True,
-                        stderr=True,
-                        timestamps=False,
-                    )
-
-                    # Store container name with the stream for prefixing
-                    log_streams.append((container.name, log_stream))
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to get logs for container {container.name}: {e}"
-                    )
-
-            if not log_streams:
-                self.log_queue.put(
-                    (
-                        session_id,
-                        "error",
-                        f"Could not stream logs for any containers in stack {stack_name}",
-                    )
-                )
-                return
-
-            # Stream logs from all containers
-            has_any_logs = False
-
-            # Set a shorter timer to check if we've received any logs
-            # This is a compromise - we can't do instant checks for stacks without
-            # potentially missing logs from some containers
-            check_timer = threading.Timer(
-                0.5, lambda: self._check_no_logs_found() if not has_any_logs else None
-            )
-            check_timer.start()
-
-            # Create threads to read from each stream
-            from queue import Queue
-
-            # Queue to collect logs from all container threads
-            combined_queue = Queue()
-
-            def read_container_logs(name, stream):
-                """Read logs from a single container stream."""
-                try:
-                    for line in stream:
-                        if self.stop_event.is_set():
-                            break
-
-                        # Decode and strip the line
-                        if isinstance(line, bytes):
-                            line = line.decode("utf-8", errors="replace")
-                        line = line.rstrip()
-                        # Strip ANSI escape codes to prevent text selection issues
-                        line = strip_ansi_codes(line)
-
-                        if line:
-                            # Prefix with container name for stack logs
-                            prefixed_line = f"[{name}] {line}"
-                            combined_queue.put(prefixed_line)
-                except Exception as e:
-                    logger.error(f"Error reading logs from {name}: {e}")
-
-            # Start threads for each container
-            threads = []
-            for name, stream in log_streams:
-                thread = threading.Thread(
-                    target=read_container_logs, args=(name, stream), daemon=True
-                )
-                thread.start()
-                threads.append(thread)
-
-            # Read from combined queue and forward to main log queue
-            while not self.stop_event.is_set():
-                try:
-                    # Use timeout to periodically check stop_event
-                    line = combined_queue.get(timeout=0.1)
-                    has_any_logs = True
-                    self.log_queue.put((session_id, "log", line))
-                except:
-                    # Check if all threads have finished
-                    if all(not t.is_alive() for t in threads):
-                        break
-
-            # Cancel timer if still running
-            check_timer.cancel()
-
-        except Exception as e:
-            logger.error(f"Error streaming stack logs: {e}", exc_info=True)
-            raise
 
     def _process_log_queue(self):
         """Timer callback to process queued log lines."""
+        if not self.log_streamer:
+            return
+
+        log_queue = self.log_streamer.get_queue()
+
         try:
             processed = 0
+            matched_lines = 0  # Track lines that match the filter
+            has_displayed_any = (
+                len(self.log_display.text.strip()) > 0
+            )  # Check if we've shown anything yet
             # Process up to 50 lines per tick to avoid blocking
             for _ in range(50):
-                if self.log_queue.empty():
+                if log_queue.empty():
                     break
 
                 try:
-                    queue_item = self.log_queue.get_nowait()
+                    queue_item = log_queue.get_nowait()
 
                     # Handle both old format (msg_type, content) and new format (session_id, msg_type, content)
                     if len(queue_item) == 2:
@@ -824,52 +505,35 @@ class LogPane(Vertical):
                         session_id, msg_type, content = queue_item
 
                     # Skip if this is from an old session
-                    if session_id != 0 and session_id != self.log_session_id:
+                    if session_id != 0 and session_id != self.current_session_id:
                         continue
 
                     processed += 1
 
                     if msg_type == "log":
                         # Store all log lines
-                        self.all_log_lines.append(content)
+                        self.log_filter.add_line(content)
 
-                        # Apply search filter if set (empty string means no filter)
-                        if (
-                            not self.search_filter
-                            or self.search_filter.lower() in content.lower()
-                        ):
-                            # If this is the first matching line and we had no matches before, clear the "no matches" message
-                            if self.search_filter and self.filtered_line_count == 0:
-                                self.log_display.clear()
-
-                            # If we're showing the "no logs found" message, clear it
-                            if self.showing_no_logs_message:
+                        # Apply search filter with marker context awareness
+                        if self.log_filter.should_show_line_with_context(content):
+                            matched_lines += 1
+                            # If we're showing the "no logs found" message or loading message, clear it
+                            if (
+                                self.showing_no_logs_message
+                                or self.showing_loading_message
+                            ):
                                 self.log_display.clear()
                                 self.showing_no_logs_message = False
+                                self.showing_loading_message = False
 
                             # Append to the text area
-                            # Move cursor to end first, then insert
-                            self.log_display.move_cursor(self.log_display.document.end)
-                            self.log_display.insert(content + "\n")
-
-                            self.filtered_line_count += 1
-
-                            # Auto-scroll if enabled
-                            if self.auto_follow:
-                                # Move cursor to end of document
-                                self.log_display.move_cursor(
-                                    self.log_display.document.end
-                                )
-                                # Ensure cursor is visible (this scrolls to it)
-                                self.log_display.scroll_cursor_visible()
+                            self._append_log_line(content)
 
                             # First line processing handled elsewhere
                     elif msg_type == "error":
                         # Display errors (don't store these in all_log_lines)
                         error_msg = f"ERROR: {content}"
-                        # Move cursor to end first, then insert
-                        self.log_display.move_cursor(self.log_display.document.end)
-                        self.log_display.insert(error_msg + "\n")
+                        self._append_log_line(error_msg)
                         logger.error(f"Queue error message: {content}")
                     elif msg_type == "no_logs":
                         # Show informative message when no logs are found
@@ -888,10 +552,13 @@ class LogPane(Vertical):
                 self.initial_log_check_done = True
 
                 # If we have a filter, have processed some logs, but no lines matched, show message
+                # Use our local matched_lines count instead of the filter's count
+                # Only show the "no match" message if we haven't displayed anything yet
                 if (
-                    self.search_filter
-                    and len(self.all_log_lines) > 0
-                    and self.filtered_line_count == 0
+                    self.log_filter.has_filter()
+                    and self.log_filter.get_line_count() > 0
+                    and matched_lines == 0
+                    and not has_displayed_any  # Only show if nothing displayed yet
                 ):
                     self.log_display.text = "No log lines match filter"
 
@@ -911,88 +578,42 @@ class LogPane(Vertical):
             "Waiting for new logs..."
         )
 
-    def _check_no_logs_found(self):
-        """Check if no logs were found and show an informative message."""
-        if self.waiting_for_logs and not self.initial_log_check_done:
-            # No logs received yet
-            # Note: We don't have session_id here, but it's okay for no_logs message
-            self.log_queue.put((0, "no_logs", ""))
-
-    def _convert_since_to_timestamp(self, since_str):
-        """Convert a time string like '5m' or '1h' to a Unix timestamp.
-
-        Args:
-            since_str: Time string (e.g., '5m', '1h', '24h')
-
-        Returns:
-            Unix timestamp for the 'since' parameter
-        """
-        import re
-        import time
-
-        # Parse the time unit and value
-        match = re.match(r"^(\d+)([mhd])$", since_str)
-        if not match:
-            # If format is invalid, default to 15 minutes
-            logger.warning(f"Invalid since format: {since_str}, defaulting to 15m")
-            return int(time.time() - 15 * 60)
-
-        value = int(match.group(1))
-        unit = match.group(2)
-
-        # Convert to seconds
-        if unit == "m":
-            seconds = value * 60
-        elif unit == "h":
-            seconds = value * 3600
-        elif unit == "d":
-            seconds = value * 86400
-        else:
-            seconds = 15 * 60  # Default to 15 minutes
-
-        # Return Unix timestamp for 'since' time
-        return int(time.time() - seconds)
-
     def _refilter_logs(self):
         """Re-filter and display all stored log lines based on current search filter."""
         self.log_display.clear()
-        self.filtered_line_count = 0  # Reset count
 
         # If we're showing the "no logs found" message and there are no logs,
         # preserve that message regardless of filter
-        if self.showing_no_logs_message and len(self.all_log_lines) == 0:
+        if self.showing_no_logs_message and self.log_filter.get_line_count() == 0:
             self.log_display.text = self._get_no_logs_message()
             return
 
-        # Build filtered text
-        filtered_lines = []
-        for line in self.all_log_lines:
-            if not self.search_filter or self.search_filter.lower() in line.lower():
-                filtered_lines.append(line)
-                self.filtered_line_count += 1
+        # Get filtered lines
+        filtered_lines = self.log_filter.get_filtered_lines()
 
         # Set all filtered lines at once
         if filtered_lines:
-            self.log_display.text = "\n".join(filtered_lines) + "\n"
-        elif self.search_filter and len(self.all_log_lines) > 0:
+            # Reconstruct the text exactly as it was originally displayed
+            # Each line should end with a newline, including empty lines
+            text_parts = []
+            for line in filtered_lines:
+                text_parts.append(line)
+                text_parts.append("\n")
+            self.log_display.text = "".join(text_parts)
+        elif self.log_filter.has_filter() and self.log_filter.get_line_count() > 0:
             # If we have a filter and no lines match, show a message
             self.log_display.text = "No log lines match filter"
         else:
             self.log_display.text = ""
 
-        # Auto-scroll to bottom if auto-follow is enabled
+        # Handle scrolling based on auto-follow setting
         if self.auto_follow and filtered_lines:
-            # Move cursor to end of document
-            self.log_display.move_cursor(self.log_display.document.end)
-            # Ensure cursor is visible (this scrolls to it)
-            self.log_display.scroll_cursor_visible()
+            self._auto_scroll_to_bottom()
 
     def on_input_changed(self, event):
         """Handle search input changes."""
         if event.input.id == "search-input":
-            self.search_filter = (
-                event.value.strip()
-            )  # Strip whitespace to treat empty strings as no filter
+            self.log_filter.set_filter(event.value)
             # Re-filter existing logs when search filter changes
             self._refilter_logs()
 
@@ -1002,11 +623,7 @@ class LogPane(Vertical):
             self.auto_follow = event.value
 
             # If auto-follow is enabled, immediately scroll to the bottom
-            if self.auto_follow:
-                # Move cursor to end of document
-                self.log_display.move_cursor(self.log_display.document.end)
-                # Ensure cursor is visible (this scrolls to it)
-                self.log_display.scroll_cursor_visible()
+            self._auto_scroll_to_bottom()
 
     def on_select_changed(self, event):
         """Handle dropdown selection changes."""
@@ -1031,19 +648,18 @@ class LogPane(Vertical):
     def _restart_logs(self):
         """Restart log streaming with new settings."""
         # Clear display and show loading message immediately
-        self.log_display.clear()
-        self.all_log_lines.clear()
-        self.filtered_line_count = 0
-        self.showing_no_logs_message = False  # Reset when restarting logs
+        self._clear_logs()
 
         # Show loading message
         item_type, item_id = self.current_item
         self.log_display.text = f"Reloading logs for {item_type}: {item_id}...\n"
         self.waiting_for_logs = True
         self.initial_log_check_done = False
+        self.showing_loading_message = True
 
-        # Stop current logs after showing the loading message
-        self._stop_logs()
+        # Stop current logs without waiting to avoid blocking the UI
+        if self.log_streamer:
+            self.log_streamer.stop_streaming(wait=False)
 
         # Start logs again
         self._start_logs()
@@ -1054,15 +670,14 @@ class LogPane(Vertical):
         Args:
             item_type: The type of item (e.g., 'Networks', 'Images', 'Volumes')
         """
-        self.log_display.display = True
-        self.no_selection_display.display = False
-        self.log_display.clear()
-        self.all_log_lines.clear()  # Clear the log buffer
+        self._show_logs_ui()
+        self._clear_logs()  # Clear the log buffer
         self.log_display.text = (
             f"{item_type} do not have logs. Select a container or stack to view logs."
         )
         # Stop any existing log streaming
-        self._stop_logs_async()
+        if self.log_streamer:
+            self.log_streamer.stop_streaming(wait=False)
         self.refresh()
 
     def action_copy_selection(self):
@@ -1096,3 +711,175 @@ class LogPane(Vertical):
         """Select all text in the log display."""
         if self.log_display.display:
             self.log_display.select_all()
+
+    def on_button_pressed(self, event):
+        """Handle button presses."""
+        if event.button.id == "mark-position-button":
+            self._mark_position()
+
+    def _mark_position(self):
+        """Add a timestamp marker to the log display."""
+        if self.log_display.display:
+            from datetime import datetime
+
+            # Get current timestamp
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            marker_text = f"------ MARKED {timestamp} ------"
+
+            # Add to log filter for persistence through filtering
+            # Add empty lines and marker as separate entries to preserve formatting
+            self.log_filter.add_lines(["", "", marker_text, "", ""])
+
+            # Always display the marker and its context lines
+            # The filter will ensure these are always shown together
+            self._append_log_line("")
+            self._append_log_line("")
+            self._append_log_line(marker_text)
+            self._append_log_line("")
+            self._append_log_line("")
+
+            # Show notification
+            self.app.notify(
+                f"Position marked at {timestamp}",
+                severity="information",
+                timeout=2,
+            )
+
+    def _show_logs_ui(self):
+        """Show the log display UI and hide the no-selection display."""
+        self.log_display.display = True
+        self.no_selection_display.display = False
+
+    def _show_no_selection_ui(self):
+        """Show the no-selection display and hide the log display."""
+        self.log_display.display = False
+        self.no_selection_display.display = True
+
+    def _clear_logs(self):
+        """Clear the log display and filter."""
+        self.log_display.clear()
+        # Preserve the search filter when clearing logs
+        current_filter = self.log_filter.search_filter
+        self.log_filter.clear()
+        # Restore the search filter so new logs will be filtered correctly
+        self.log_filter.set_filter(current_filter)
+        self.showing_no_logs_message = False
+        self.showing_loading_message = False
+
+    def _auto_scroll_to_bottom(self):
+        """Auto-scroll to the bottom of the log display if auto-follow is enabled."""
+        if self.auto_follow:
+            self.log_display.move_cursor(self.log_display.document.end)
+            self.log_display.scroll_cursor_visible()
+
+    def _append_log_line(self, line: str):
+        """Append a line to the log display and handle auto-scrolling.
+
+        Args:
+            line: The log line to append
+        """
+        # Save scroll position if not following
+        if not self.auto_follow:
+            saved_scroll_y = self.log_display.scroll_y
+
+        # Simply append the text
+        current_text = self.log_display.text
+        self.log_display.text = current_text + line + "\n"
+
+        # Handle scrolling based on auto-follow setting
+        if self.auto_follow:
+            # Scroll to the bottom to follow new logs
+            self.log_display.move_cursor(self.log_display.document.end)
+            self.log_display.scroll_cursor_visible()
+        else:
+            # Restore the scroll position to prevent jumping
+            self.log_display.scroll_y = saved_scroll_y
+
+    def _is_container_stopped(self, status: str) -> bool:
+        """Check if a container status indicates it's stopped.
+
+        Args:
+            status: The container status string
+
+        Returns:
+            True if the container is stopped, False otherwise
+        """
+        status_lower = status.lower()
+        return any(state in status_lower for state in ["exited", "stopped", "created"])
+
+    def _is_container_running(self, status: str) -> bool:
+        """Check if a container status indicates it's running.
+
+        Args:
+            status: The container status string
+
+        Returns:
+            True if the container is running, False otherwise
+        """
+        status_lower = status.lower()
+        return "running" in status_lower or "up" in status_lower
+
+    def _update_header_for_item(
+        self, item_type: str, item_id: str, item_data: dict
+    ) -> bool:
+        """Update the header based on the selected item type.
+
+        Args:
+            item_type: Type of item
+            item_id: ID of the item
+            item_data: Dictionary containing item information
+
+        Returns:
+            True if the item type has logs, False otherwise
+        """
+        item_name = item_data.get("name", item_id)
+
+        if item_type == "container":
+            self.header.update(f"📋 Log Pane - Container: {item_name}")
+            return True
+        elif item_type == "stack":
+            self.header.update(f"📋 Log Pane - Stack: {item_name}")
+            return True
+        elif item_type == "network":
+            self.header.update(f"📋 Log Pane - Network: {item_name}")
+            self._show_no_logs_message_for_item_type("Networks")
+            return False
+        elif item_type == "image":
+            self.header.update(f"📋 Log Pane - Image: {item_id[:12]}")
+            self._show_no_logs_message_for_item_type("Images")
+            return False
+        elif item_type == "volume":
+            self.header.update(f"📋 Log Pane - Volume: {item_name}")
+            self._show_no_logs_message_for_item_type("Volumes")
+            return False
+        else:
+            self.header.update("📋 Log Pane - Unknown Selection")
+            return True
+
+    def _create_tail_select(self) -> Select:
+        """Create the tail select dropdown with current value."""
+        tail_options = list(self.TAIL_OPTIONS)
+        # If current value is not in options, add it
+        if not any(opt[1] == self.LOG_TAIL for opt in tail_options):
+            tail_options.insert(0, (f"{self.LOG_TAIL} lines", self.LOG_TAIL))
+
+        return Select(
+            options=tail_options,
+            value=self.LOG_TAIL,
+            id="tail-select",
+            classes="log-setting",
+        )
+
+    def _create_since_select(self) -> Select:
+        """Create the since select dropdown with current value."""
+        since_options = list(self.SINCE_OPTIONS)
+        # If current value is not in options, add it
+        if not any(opt[1] == self.LOG_SINCE for opt in since_options):
+            since_options.insert(0, (f"{self.LOG_SINCE}", self.LOG_SINCE))
+
+        return Select(
+            options=since_options,
+            value=self.LOG_SINCE,
+            id="since-select",
+            classes="log-setting",
+        )
