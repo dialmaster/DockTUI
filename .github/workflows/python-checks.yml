@@ -74,6 +74,63 @@ jobs:
         echo '```' >> $GITHUB_STEP_SUMMARY
         poetry run coverage report --skip-covered --sort=cover >> $GITHUB_STEP_SUMMARY
         echo '```' >> $GITHUB_STEP_SUMMARY
+        
+        # Generate coverage report for PR comment
+        if [ "${{ github.event_name }}" == "pull_request" ]; then
+          echo "COVERAGE_REPORT<<EOF" >> $GITHUB_ENV
+          echo "## Detailed Coverage Report" >> $GITHUB_ENV
+          echo "" >> $GITHUB_ENV
+          echo "### Summary" >> $GITHUB_ENV
+          echo '```' >> $GITHUB_ENV
+          poetry run coverage report | head -n 10 >> $GITHUB_ENV
+          echo '```' >> $GITHUB_ENV
+          echo "" >> $GITHUB_ENV
+          echo "### Files with Low Coverage" >> $GITHUB_ENV
+          echo '```' >> $GITHUB_ENV
+          poetry run coverage report --skip-covered --sort=cover | head -n 30 >> $GITHUB_ENV
+          echo '```' >> $GITHUB_ENV
+          echo "" >> $GITHUB_ENV
+          echo "*View full report in the [workflow summary](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})*" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+        fi
+
+    - name: Post detailed coverage comment
+      if: github.event_name == 'pull_request' && env.COVERAGE_REPORT != ''
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ github.token }}
+        script: |
+          const coverageReport = process.env.COVERAGE_REPORT;
+          
+          // Find existing coverage comment
+          const comments = await github.rest.issues.listComments({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+          });
+          
+          const botComment = comments.data.find(comment => 
+            comment.user.type === 'Bot' && 
+            comment.body.includes('## Detailed Coverage Report')
+          );
+          
+          if (botComment) {
+            // Update existing comment
+            await github.rest.issues.updateComment({
+              comment_id: botComment.id,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: coverageReport
+            });
+          } else {
+            // Create new comment
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: coverageReport
+            });
+          }
 
     - name: Coverage comment
       uses: py-cov-action/python-coverage-comment-action@v3
