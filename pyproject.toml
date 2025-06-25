@@ -15,6 +15,7 @@ pyyaml = "^6.0.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0.0"
+pytest-cov = "^4.1.0"
 black = "^24.1.1"
 isort = "^5.13.2"
 autoflake = "^2.3.1"
@@ -48,6 +49,24 @@ testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
 addopts = "-v --tb=short"
 
+[tool.coverage.run]
+source = ["dockerview"]
+omit = ["*/tests/*", "*/__init__.py", "*/__main__.py"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]
+
 [tool.poe.tasks]
 format = [
     {cmd = "autoflake --remove-all-unused-imports --remove-unused-variables --in-place --recursive dockerview/"},
@@ -60,5 +79,6 @@ lint = [
     {cmd = "black --check dockerview/"}
 ]
 test = "pytest -v"
+test-cov = "pytest -v --cov=dockerview --cov-report=term-missing --cov-report=html"
 check = ["lint", "test"]
 all = ["format", "test"]
