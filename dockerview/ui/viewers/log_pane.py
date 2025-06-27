@@ -431,15 +431,33 @@ class LogPane(Vertical):
 
         status = item_data.get("status", "")
 
+        # Update header based on status
+        item_name = item_data.get("name", self.current_item[1])
+
         if self._is_container_stopped(status):
+            # Update header to show NOT RUNNING
+            header_text = Text()
+            header_text.append("📋 Log Pane - Container: ")
+            header_text.append(item_name)
+            header_text.append(" - ", style="")
+            header_text.append("NOT RUNNING", style="red bold")
+            self.header.update(header_text)
+
             # Container stopped, but still try to show historical logs
             self.log_display.clear()
-            self.log_display.text = f"Container '{item_data.get('name', self.current_item[1])}' stopped. Loading historical logs...\n"
+            self.log_display.text = (
+                f"Container '{item_name}' stopped. Loading historical logs...\n"
+            )
             self._start_logs()
         elif self._is_container_running(status):
+            # Update header for running container
+            self.header.update(f"📋 Log Pane - Container: {item_name}")
+
             # Container is running, start streaming logs
             self.log_display.clear()
-            self.log_display.text = f"Container '{item_data.get('name', self.current_item[1])}' started. Loading logs...\n"
+            self.log_display.text = (
+                f"Container '{item_name}' started. Loading logs...\n"
+            )
             self._start_logs()
 
     def _start_logs(self):
@@ -829,7 +847,18 @@ class LogPane(Vertical):
         item_name = item_data.get("name", item_id)
 
         if item_type == "container":
-            self.header.update(f"📋 Log Pane - Container: {item_name}")
+            # Check if container is stopped and add status indicator
+            status = item_data.get("status", "")
+            if self._is_container_stopped(status):
+                # Create a rich Text object with red color for NOT RUNNING
+                header_text = Text()
+                header_text.append("📋 Log Pane - Container: ")
+                header_text.append(item_name)
+                header_text.append(" - ", style="")
+                header_text.append("NOT RUNNING", style="red bold")
+                self.header.update(header_text)
+            else:
+                self.header.update(f"📋 Log Pane - Container: {item_name}")
             return True
         elif item_type == "stack":
             self.header.update(f"📋 Log Pane - Stack: {item_name}")
