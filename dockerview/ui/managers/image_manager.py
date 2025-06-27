@@ -327,14 +327,27 @@ class ImageManager:
             self.parent.selected_network_data = None
             self.parent.selected_volume_data = None
 
-            # Find and store the image data
-            if hasattr(self.parent, "_last_images_data"):
-                for img_data in self.parent._last_images_data.values():
-                    if img_data["id"] == image_id:
-                        self.selected_image_data = img_data
-                        # Also update parent's reference
-                        self.parent.selected_image_data = img_data
-                        break
+            # Store basic image data from the table
+            if image_id in self.image_rows and self.images_table:
+                row_index = self.image_rows[image_id]
+                # Extract data from the table row
+                self.selected_image_data = {
+                    "id": image_id,
+                    "repository": str(self.images_table.get_cell_at((row_index, 0))),
+                    "tag": str(self.images_table.get_cell_at((row_index, 1))),
+                    "containers": str(self.images_table.get_cell_at((row_index, 3))),
+                    "created": str(self.images_table.get_cell_at((row_index, 4))),
+                    "size": str(self.images_table.get_cell_at((row_index, 5))),
+                    "status": str(self.images_table.get_cell_at((row_index, 6))),
+                    "tags": [],  # Will be populated from repository:tag
+                }
+                # Build tags list from repository and tag
+                repo = self.selected_image_data["repository"]
+                tag = self.selected_image_data["tag"]
+                if repo != "<none>" and tag != "<none>":
+                    self.selected_image_data["tags"] = [f"{repo}:{tag}"]
+                # Also update parent's reference
+                self.parent.selected_image_data = self.selected_image_data
 
             # Focus the table row
             if self.images_table:

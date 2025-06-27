@@ -144,6 +144,9 @@ class LogStreamer:
             # Convert since parameter to proper format
             since_timestamp = self._convert_since_to_timestamp(since)
 
+            # Check if container is running
+            is_running = container.status.lower() == "running"
+
             # First, quickly check if there are any logs without following
             initial_logs = container.logs(
                 stream=False,
@@ -158,12 +161,15 @@ class LogStreamer:
             # If no logs found initially, show message quickly
             if not initial_logs or not initial_logs.strip():
                 self._check_no_logs_found(session_id)
-                # Still continue to stream in case new logs appear
+                # For exited containers, return early if no logs
+                if not is_running:
+                    return
+                # Still continue to stream for running containers in case new logs appear
 
-            # Now stream logs with follow
+            # Now stream logs - only follow if container is running
             log_stream = container.logs(
                 stream=True,
-                follow=True,
+                follow=is_running,  # Only follow logs for running containers
                 tail=tail_int,
                 since=since_timestamp,
                 stdout=True,

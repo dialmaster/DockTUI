@@ -13,7 +13,8 @@ from dockerview.config import config
 from dockerview.docker_mgmt.manager import DockerManager
 from dockerview.ui.actions.docker_actions import DockerActions
 from dockerview.ui.actions.refresh_actions import RefreshActions
-from dockerview.ui.containers import ContainerList, SelectionChanged
+from dockerview.ui.base.container_list_base import SelectionChanged
+from dockerview.ui.containers import ContainerList
 from dockerview.ui.dialogs.confirm import (
     ComposeDownModal,
     RemoveImageModal,

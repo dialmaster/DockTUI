@@ -370,15 +370,8 @@ class LogPane(Vertical):
         # Clear previous logs and stored lines
         self._clear_logs()
 
-        # Check if this is a container and if it's not running - do this BEFORE stopping logs
-        if item_type == "container" and item_data.get("status"):
-            if self._is_container_stopped(item_data["status"]):
-                # Container is not running, show appropriate message immediately
-                self.log_display.text = f"Container '{item_data.get('name', item_id)}' is not running.\nStatus: {item_data['status']}"
-                # Stop any existing log streaming (non-blocking)
-                if self.log_streamer:
-                    self.log_streamer.stop_streaming(wait=False)
-                return
+        # For exited containers, we'll still try to fetch logs but with follow=False
+        # This will be handled in the LogStreamer by checking container status
 
         # Show loading message immediately, but only if no filter is active
         # If a filter is active, we'll wait to see if any lines match before showing anything
@@ -439,9 +432,10 @@ class LogPane(Vertical):
         status = item_data.get("status", "")
 
         if self._is_container_stopped(status):
-            # Container is not running, show message
-            self.log_display.text = f"Container '{item_data.get('name', self.current_item[1])}' is not running.\nStatus: {item_data['status']}"
-            self.refresh()
+            # Container stopped, but still try to show historical logs
+            self.log_display.clear()
+            self.log_display.text = f"Container '{item_data.get('name', self.current_item[1])}' stopped. Loading historical logs...\n"
+            self._start_logs()
         elif self._is_container_running(status):
             # Container is running, start streaming logs
             self.log_display.clear()
