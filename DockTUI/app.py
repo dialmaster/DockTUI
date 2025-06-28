@@ -521,7 +521,7 @@ class DockTUIApp(App, DockerActions, RefreshActions):
 
 
 def main():
-    """Run the Docker container monitoring application."""
+    """Run the DockTUI application."""
     try:
         app = DockTUIApp()
         app.run()

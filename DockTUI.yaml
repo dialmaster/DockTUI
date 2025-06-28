@@ -1,5 +1,5 @@
-# DockerView Configuration File
-# This file controls various settings for the DockerView application
+# DockTUI Configuration File
+# This file controls various settings for the DockTUI application
 
 # Application Settings
 app:
@@ -27,7 +27,7 @@ log:
   since: '15m'
 
 # Note: You can also override these settings with environment variables:
-# - DOCKERVIEW_APP_REFRESH_INTERVAL
-# - DOCKERVIEW_LOG_MAX_LINES
-# - DOCKERVIEW_LOG_TAIL
-# - DOCKERVIEW_LOG_SINCE
+# - DOCKTUI_APP_REFRESH_INTERVAL
+# - DOCKTUI_LOG_MAX_LINES
+# - DOCKTUI_LOG_TAIL
+# - DOCKTUI_LOG_SINCE

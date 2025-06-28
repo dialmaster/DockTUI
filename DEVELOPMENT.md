@@ -91,8 +91,8 @@ DockTUI/
 
 ```bash
 # Clone the repository
-git clone https://github.com/dialmaster/dockerview.git
-cd dockerview
+git clone https://github.com/dialmaster/DockTUI.git
+cd DockTUI
 
 # Install dependencies
 make install
