@@ -194,6 +194,8 @@ class RefreshActions:
             # Check if selected container's status changed - update log pane if needed
             if self.log_pane and self.container_list.selected_item:
                 item_type, item_id = self.container_list.selected_item
+                old_status = getattr(self, "_current_selection_status", "none")
+
                 if item_type == "container":
                     # Find the container in the new data
                     for container in containers:
@@ -203,7 +205,34 @@ class RefreshActions:
                             self.log_pane.update_selection(
                                 "container", item_id, container
                             )
+
+                            # Check if status changed and refresh bindings if needed
+                            new_status = container.get("status", "none")
+                            if old_status != new_status and hasattr(
+                                self, "_current_selection_status"
+                            ):
+                                self._current_selection_status = new_status
+                                if hasattr(self, "refresh_bindings"):
+                                    self.refresh_bindings()
                             break
+                elif item_type == "image":
+                    # Check if selected image's usage status changed
+                    if self.container_list.image_manager.selected_image_data:
+                        image_data = (
+                            self.container_list.image_manager.selected_image_data
+                        )
+                        # For images, we track if they have containers
+                        was_in_use = old_status == "Active"
+                        is_in_use = bool(image_data.get("container_names", []))
+
+                        if was_in_use != is_in_use and hasattr(
+                            self, "_current_selection_status"
+                        ):
+                            self._current_selection_status = (
+                                "Active" if is_in_use else "Unused"
+                            )
+                            if hasattr(self, "refresh_bindings"):
+                                self.refresh_bindings()
 
             # Update title with summary
             total_running = sum(s["running"] for s in stacks.values())

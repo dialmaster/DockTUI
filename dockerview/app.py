@@ -13,7 +13,8 @@ from dockerview.config import config
 from dockerview.docker_mgmt.manager import DockerManager
 from dockerview.ui.actions.docker_actions import DockerActions
 from dockerview.ui.actions.refresh_actions import RefreshActions
-from dockerview.ui.containers import ContainerList, SelectionChanged
+from dockerview.ui.base.container_list_base import SelectionChanged
+from dockerview.ui.containers import ContainerList
 from dockerview.ui.dialogs.confirm import (
     ComposeDownModal,
     RemoveImageModal,
@@ -69,16 +70,6 @@ class DockerViewApp(App, DockerActions, RefreshActions):
         border-bottom: solid $primary-darken-2;
     }
 
-    DataTable > .datatable--cursor {
-        background: $primary-darken-3;
-        color: $text;
-    }
-
-    DataTable:focus > .datatable--cursor {
-        background: $primary-darken-2;
-        color: $text;
-    }
-
     Header {
         background: $surface-darken-2;
         color: $primary-lighten-2;
@@ -105,7 +96,7 @@ class DockerViewApp(App, DockerActions, RefreshActions):
         Binding("e", "restart", "Restart Selected", show=True),
         Binding("u", "recreate", "Recreate Selected", show=True),
         Binding("d", "down", "Down Selected Stack", show=True),
-        Binding("r", "remove_image", "Remove Selected Image", show=True),
+        Binding("r", "remove", "Remove Selected", show=True),
         Binding("R", "remove_unused_images", "Remove All Unused Images", show=True),
     ]
 
@@ -125,6 +116,7 @@ class DockerViewApp(App, DockerActions, RefreshActions):
             self.status_bar: StatusBar | None = None
             # Track current selection type for dynamic bindings
             self._current_selection_type = "none"
+            self._current_selection_status = "none"
         except Exception as e:
             logger.error(f"Error during initialization: {str(e)}", exc_info=True)
             raise
@@ -167,6 +159,11 @@ class DockerViewApp(App, DockerActions, RefreshActions):
                     "Recreate Selected",
                     "Recreate the selected container/stack (docker compose up -d)",
                     self.action_recreate,
+                ),
+                (
+                    "Remove Selected Container",
+                    "Remove the selected container (permanently)",
+                    self.action_remove_container,
                 ),
                 (
                     "Down Selected Stack",
@@ -285,6 +282,39 @@ class DockerViewApp(App, DockerActions, RefreshActions):
             return
         self.execute_docker_command("recreate")
 
+    def action_remove_container(self) -> None:
+        """Remove the selected container with confirmation dialog."""
+        if not self.is_action_applicable("remove"):
+            return
+
+        item_type, item_id = self.container_list.selected_item
+
+        # Only allow removing containers, not stacks
+        if item_type != "container":
+            self.error_display.update("Selected item is not a container")
+            return
+
+        # Get container name for the modal
+        container_name = "unknown"
+        if self.container_list.selected_container_data:
+            container_name = self.container_list.selected_container_data.get(
+                "name", "unknown"
+            )
+
+        # Import the modal here to avoid circular imports
+        from dockerview.ui.dialogs.confirm import RemoveContainerModal
+
+        # Create the modal
+        modal = RemoveContainerModal(container_name)
+
+        # Push the confirmation modal
+        def handle_remove_confirmation(confirmed: bool) -> None:
+            """Handle the result from the confirmation modal."""
+            if confirmed:
+                self.execute_docker_command("remove")
+
+        self.push_screen(modal, handle_remove_confirmation)
+
     def action_down(self) -> None:
         """Take down the selected stack with confirmation dialog."""
         if not self.is_action_applicable("down"):
@@ -316,8 +346,45 @@ class DockerViewApp(App, DockerActions, RefreshActions):
 
         self.push_screen(modal, handle_down_confirmation)
 
+    def action_remove(self) -> None:
+        """Context-aware remove action: removes container if stopped/exited, or image if selected."""
+        if not self.container_list or not self.container_list.selected_item:
+            self.error_display.update("No item selected")
+            return
+
+        item_type, item_id = self.container_list.selected_item
+
+        # Handle container removal
+        if item_type == "container":
+            # Check if container is stopped/exited
+            if self.container_list.selected_container_data:
+                status = self.container_list.selected_container_data.get(
+                    "status", ""
+                ).lower()
+                if status not in ["exited", "stopped", "created", "dead"]:
+                    self.error_display.update(
+                        f"Cannot remove running container (status: {status})"
+                    )
+                    return
+
+                # Call the existing action_remove_container method
+                self.action_remove_container()
+            else:
+                self.error_display.update("No container data available")
+            return
+
+        # Handle image removal (existing logic)
+        elif item_type == "image":
+            self._remove_image()
+        else:
+            self.error_display.update(f"Cannot remove {item_type}")
+
     def action_remove_image(self) -> None:
         """Remove the selected unused image with confirmation dialog."""
+        self._remove_image()
+
+    def _remove_image(self) -> None:
+        """Internal method to remove the selected image."""
         if not self.container_list or not self.container_list.selected_item:
             self.error_display.update("No image selected")
             return
@@ -375,11 +442,11 @@ class DockerViewApp(App, DockerActions, RefreshActions):
             None: Show the key as disabled (dimmed) in the footer
         """
         SELECTION_ACTIONS = {
-            "container": ["start", "stop", "restart", "recreate"],
+            "container": ["start", "stop", "restart", "recreate", "remove"],
             "service": ["start", "stop", "restart", "recreate"],
             "stack": ["start", "stop", "restart", "recreate", "down"],
             "network": [],
-            "image": ["remove_image", "remove_unused_images"],
+            "image": ["remove", "remove_unused_images"],
             "volume": [],
             "none": [],
         }
@@ -394,8 +461,36 @@ class DockerViewApp(App, DockerActions, RefreshActions):
         if not selection_type or selection_type not in SELECTION_ACTIONS:
             return False
 
-        available_actions = SELECTION_ACTIONS[selection_type]
-        return action in available_actions
+        # Get base available actions for this selection type
+        base_actions = SELECTION_ACTIONS.get(selection_type, [])
+
+        # Special handling for context-aware remove action
+        if action == "remove":
+            if selection_type == "container":
+                # Check container status - only allow remove for stopped/exited containers
+                status = self._current_selection_status.lower()
+                if status not in ["exited", "stopped", "created", "dead"]:
+                    return None  # Show as disabled
+            elif selection_type == "image":
+                # For images, check if they're in use
+                if self.container_list and self.container_list.selected_item:
+                    item_type, item_id = self.container_list.selected_item
+                    if (
+                        item_type == "image"
+                        and self.container_list.image_manager.selected_image_data
+                    ):
+                        container_names = (
+                            self.container_list.image_manager.selected_image_data.get(
+                                "container_names", []
+                            )
+                        )
+                        if container_names:
+                            return None  # Show as disabled
+            else:
+                # Remove not applicable to other types
+                return False
+
+        return action in base_actions
 
     def on_selection_changed(self, event: SelectionChanged) -> None:
         """Handle selection changes from the container list.
@@ -417,6 +512,11 @@ class DockerViewApp(App, DockerActions, RefreshActions):
             self.container_list._update_footer_with_selection()
             self.status_bar.refresh()
         self._current_selection_type = event.item_type
+        # Get status from item_data, handling None case
+        if event.item_data:
+            self._current_selection_status = event.item_data.get("status", "none")
+        else:
+            self._current_selection_status = "none"
         self.refresh_bindings()
 
 

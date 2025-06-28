@@ -140,15 +140,17 @@ class ContainerListBase(VerticalScroll):
         max-height: 100%;
     }
 
-    /* Make sure the cursor is visible and properly styled */
+    /* Force cursor to be invisible when table is not focused */
     DataTable > .datatable--cursor {
-        background: $primary-darken-3;
-        color: $text;
+        background: transparent !important;
+        color: $text !important;
+        text-style: none !important;
     }
-
+    
+    /* Show cursor only when table is focused */
     DataTable:focus > .datatable--cursor {
-        background: $primary;
-        color: $text;
+        background: $primary !important;
+        color: $text !important;
     }
 
     /* Style for row hover */
