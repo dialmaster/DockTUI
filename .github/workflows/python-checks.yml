@@ -37,12 +37,13 @@ jobs:
         path: .venv
         key: venv-${{ runner.os }}-${{ hashFiles('**/poetry.lock') }}
 
-    - name: Install dependencies
+    - name: Install dependencies (without cache)
       if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
-      run: poetry install --no-interaction --no-root
+      run: poetry install --no-interaction --with dev
 
-    - name: Install project
-      run: poetry install --no-interaction
+    - name: Install dependencies (with cache)
+      if: steps.cached-poetry-dependencies.outputs.cache-hit == 'true'
+      run: poetry install --no-interaction --no-root --with dev
 
     - name: Run autoflake unused imports check
       run: |
