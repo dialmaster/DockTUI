@@ -8,7 +8,7 @@ from unittest.mock import patch, Mock, mock_open
 import pytest
 import yaml
 
-from dockerview.config import Config, DEFAULT_CONFIG
+from DockTUI.config import Config, DEFAULT_CONFIG
 
 
 class TestConfig:
@@ -24,7 +24,7 @@ class TestConfig:
                 # Clear environment variables
                 with patch.dict(os.environ, {}, clear=True):
                     config = Config()
-                    
+
                     # Check default values (from DEFAULT_CONFIG)
                     assert config.get("log.max_lines") == 2000
                     assert config.get("log.tail") == 200
@@ -40,10 +40,10 @@ class TestConfig:
             try:
                 with patch.dict(os.environ, {}, clear=True):
                     config = Config()
-                    
+
                     # Test getting non-existent key with default
                     assert config.get("non.existent.key", "default_value") == "default_value"
-                    
+
                     # Test getting existing key ignores default
                     assert config.get("log.max_lines", 9999) == 2000  # Should return actual value, not default param
             finally:
@@ -56,12 +56,12 @@ class TestConfig:
             os.chdir(tmpdir)
             try:
                 with patch.dict(os.environ, {
-                    "DOCKERVIEW_LOG_MAX_LINES": "5000",
-                    "DOCKERVIEW_LOG_TAIL": "500",
-                    "DOCKERVIEW_LOG_SINCE": "2h"
+                    "DOCKTUI_LOG_MAX_LINES": "5000",
+                    "DOCKTUI_LOG_TAIL": "500",
+                    "DOCKTUI_LOG_SINCE": "2h"
                 }):
                     config = Config()
-                    
+
                     # Environment variables should override defaults
                     assert config.get("log.max_lines") == 5000
                     assert config.get("log.tail") == 500
@@ -81,11 +81,11 @@ class TestConfig:
             }
             yaml.dump(custom_config, f)
             config_path = f.name
-        
+
         try:
-            with patch.dict(os.environ, {"DOCKERVIEW_CONFIG": config_path}):
+            with patch.dict(os.environ, {"DOCKTUI_CONFIG": config_path}):
                 config = Config()
-                
+
                 # Custom values should be loaded
                 assert config.get("log.max_lines") == 3000
                 assert config.get("log.tail") == 300
@@ -101,12 +101,12 @@ class TestConfig:
             try:
                 with patch.dict(os.environ, {}, clear=True):
                     config = Config()
-                    
+
                     base = {"a": {"b": 1, "c": 2}, "d": 3}
                     update = {"a": {"b": 10, "e": 4}, "f": 5}
-                    
+
                     config._merge_config(base, update)
-                    
+
                     # Check merged values
                     assert base["a"]["b"] == 10  # Updated
                     assert base["a"]["c"] == 2   # Preserved
@@ -123,21 +123,21 @@ class TestConfig:
             os.chdir(tmpdir)
             try:
                 with patch.dict(os.environ, {
-                    "DOCKERVIEW_LOG_MAX_LINES": "1234",
-                    "DOCKERVIEW_SOME_BOOL": "true",
-                    "DOCKERVIEW_ANOTHER_BOOL": "false",
-                    "DOCKERVIEW_SOME_STRING": "hello world"
+                    "DOCKTUI_LOG_MAX_LINES": "1234",
+                    "DOCKTUI_SOME_BOOL": "true",
+                    "DOCKTUI_ANOTHER_BOOL": "false",
+                    "DOCKTUI_SOME_STRING": "hello world"
                 }):
                     config = Config()
-                    
+
                     # Integer conversion
                     assert config.get("log.max_lines") == 1234
                     assert isinstance(config.get("log.max_lines"), int)
-                    
+
                     # Boolean conversion
                     assert config.get("some.bool") is True
                     assert config.get("another.bool") is False
-                    
+
                     # String remains string
                     assert config.get("some.string") == "hello world"
                     assert isinstance(config.get("some.string"), str)
@@ -153,17 +153,17 @@ class TestConfig:
                 # Clear environment and set HOME to temp directory
                 with patch.dict(os.environ, {'HOME': tmpdir}, clear=True):
                     config = Config()
-                    
+
                     # Trigger lazy loading by accessing config
                     _ = config.get("log.max_lines")
-                    
+
                     # Check that config file was created
-                    config_path = Path(tmpdir) / '.config' / 'dockerview' / 'dockerview.yaml'
+                    config_path = Path(tmpdir) / '.config' / 'DockTUI' / 'DockTUI.yaml'
                     assert config_path.exists()
-                    
+
                     # Check file contents
                     content = config_path.read_text()
-                    assert "DockerView Configuration File" in content
+                    assert "DockTUI Configuration File" in content
                     assert "max_lines: 2000" in content
                     assert "tail: 200" in content
                     assert "since: '15m'" in content

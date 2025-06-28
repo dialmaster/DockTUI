@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Start script for dockerview
+# Start script for DockTUI
 # This script activates the poetry environment and runs the application
 
 set -e  # Exit on any error
@@ -50,7 +50,7 @@ fi
 
 # Check if pyproject.toml exists
 if [[ ! -f "pyproject.toml" ]]; then
-    echo "Error: pyproject.toml not found. Make sure you're in the dockerview directory."
+    echo "Error: pyproject.toml not found. Make sure you're in the DockTUI directory."
     exit 1
 fi
 
@@ -60,12 +60,12 @@ poetry install
 
 # Set debug environment variable if requested
 if [[ "$DEBUG_MODE" == true ]]; then
-    echo "Starting dockerview in debug mode..."
-    echo "Debug logs will be written to ./logs/dockerview.log"
-    export DOCKERVIEW_DEBUG=1
+    echo "Starting DockTUI in debug mode..."
+    echo "Debug logs will be written to ./logs/DockTUI.log"
+    export DOCKTUI_DEBUG=1
 else
-    echo "Starting dockerview..."
+    echo "Starting DockTUI..."
 fi
 
 # Run the application using poetry
-poetry run python -m dockerview
+poetry run python -m DockTUI

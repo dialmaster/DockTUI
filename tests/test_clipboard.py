@@ -10,7 +10,7 @@ from unittest import mock
 
 import pytest
 
-from dockerview.utils.clipboard import copy_to_clipboard_async, copy_to_clipboard_sync
+from DockTUI.utils.clipboard import copy_to_clipboard_async, copy_to_clipboard_sync
 
 
 class TestCopyToClipboardSync:
@@ -48,7 +48,7 @@ class TestCopyToClipboardSync:
 
     def test_xclip_timeout(self):
         """Test xclip timeout handling."""
-        with mock.patch.dict(os.environ, {"DOCKERVIEW_IN_CONTAINER": "true"}):
+        with mock.patch.dict(os.environ, {"DOCKTUI_IN_CONTAINER": "true"}):
             with mock.patch("subprocess.Popen") as mock_popen:
                 mock_process = mock.Mock()
                 mock_process.communicate.side_effect = subprocess.TimeoutExpired(
@@ -62,7 +62,7 @@ class TestCopyToClipboardSync:
 
     def test_xclip_not_found(self):
         """Test xclip not found handling."""
-        with mock.patch.dict(os.environ, {"DOCKERVIEW_IN_CONTAINER": "true"}):
+        with mock.patch.dict(os.environ, {"DOCKTUI_IN_CONTAINER": "true"}):
             with mock.patch(
                 "subprocess.Popen", side_effect=FileNotFoundError("xclip not found")
             ):
@@ -79,8 +79,8 @@ class TestCopyToClipboardSync:
             with mock.patch.dict(
                 os.environ,
                 {
-                    "DOCKERVIEW_IN_CONTAINER": "true",
-                    "DOCKERVIEW_CLIPBOARD_FILE": tmp_path,
+                    "DOCKTUI_IN_CONTAINER": "true",
+                    "DOCKTUI_CLIPBOARD_FILE": tmp_path,
                 },
             ):
                 with mock.patch(
@@ -101,8 +101,8 @@ class TestCopyToClipboardSync:
         with mock.patch.dict(
             os.environ,
             {
-                "DOCKERVIEW_IN_CONTAINER": "true",
-                "DOCKERVIEW_CLIPBOARD_FILE": "/invalid/path/clipboard.txt",
+                "DOCKTUI_IN_CONTAINER": "true",
+                "DOCKTUI_CLIPBOARD_FILE": "/invalid/path/clipboard.txt",
             },
         ):
             with mock.patch(
@@ -114,7 +114,7 @@ class TestCopyToClipboardSync:
 
     def test_all_methods_fail(self):
         """Test when all clipboard methods fail."""
-        with mock.patch.dict(os.environ, {"DOCKERVIEW_IN_CONTAINER": "true"}):
+        with mock.patch.dict(os.environ, {"DOCKTUI_IN_CONTAINER": "true"}):
             with mock.patch(
                 "subprocess.Popen", side_effect=Exception("Subprocess failed")
             ):
@@ -129,7 +129,7 @@ class TestCopyToClipboardSync:
     def test_container_detection(self, container_value):
         """Test container environment detection with various values."""
         with mock.patch.dict(
-            os.environ, {"DOCKERVIEW_IN_CONTAINER": container_value}, clear=True
+            os.environ, {"DOCKTUI_IN_CONTAINER": container_value}, clear=True
         ):
             # Should skip pyperclip when in container
             with mock.patch("subprocess.Popen") as mock_popen:
@@ -157,7 +157,7 @@ class TestCopyToClipboardAsync:
             callback_result["success"] = success
 
         with mock.patch(
-            "dockerview.utils.clipboard.copy_to_clipboard_sync", return_value=True
+            "DockTUI.utils.clipboard.copy_to_clipboard_sync", return_value=True
         ):
             copy_to_clipboard_async("test text", callback=test_callback)
 
@@ -176,7 +176,7 @@ class TestCopyToClipboardAsync:
             callback_result["success"] = success
 
         with mock.patch(
-            "dockerview.utils.clipboard.copy_to_clipboard_sync", return_value=False
+            "DockTUI.utils.clipboard.copy_to_clipboard_sync", return_value=False
         ):
             copy_to_clipboard_async("test text", callback=test_callback)
 
@@ -189,7 +189,7 @@ class TestCopyToClipboardAsync:
     def test_async_copy_without_callback(self):
         """Test async copy without callback doesn't raise errors."""
         with mock.patch(
-            "dockerview.utils.clipboard.copy_to_clipboard_sync", return_value=True
+            "DockTUI.utils.clipboard.copy_to_clipboard_sync", return_value=True
         ) as mock_sync:
             copy_to_clipboard_async("test text")
 
@@ -209,7 +209,7 @@ class TestCopyToClipboardAsync:
 
         with mock.patch.object(threading.Thread, "__init__", capture_thread_init):
             with mock.patch(
-                "dockerview.utils.clipboard.copy_to_clipboard_sync", return_value=True
+                "DockTUI.utils.clipboard.copy_to_clipboard_sync", return_value=True
             ):
                 copy_to_clipboard_async("test text")
 

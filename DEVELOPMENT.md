@@ -1,10 +1,10 @@
 # Development Guide
 
-This guide covers the technical architecture, development setup, and contribution guidelines for dockerview.
+This guide covers the technical architecture, development setup, and contribution guidelines for DockTUI.
 
 ## Architecture
 
-dockerview is built using Python with the following core components:
+DockTUI is built using Python with the following core components:
 
 ### UI Layer (Textual)
 - Main dashboard view with collapsible stack sections
@@ -38,17 +38,17 @@ Docker Engine <-> docker-py SDK <-> DockerManager (with threading) <-> UI Compon
 
 ### Key Components
 
-- **DockerViewApp** (`dockerview/app.py`): Main Textual application class coordinating UI and actions
+- **DockTUIApp** (`DockTUI/app.py`): Main Textual application class coordinating UI and actions
   - Uses **DockerActions** mixin for Docker operation handling
   - Uses **RefreshActions** mixin for UI refresh management
   - Provides command palette integration
-- **ContainerList** (`dockerview/ui/containers.py`): Navigable list of containers with real-time stats
+- **ContainerList** (`DockTUI/ui/containers.py`): Navigable list of containers with real-time stats
   - Uses specialized managers for different Docker resources (images, networks, stacks, volumes)
-- **DockerManager** (`dockerview/docker_mgmt/manager.py`): Handles direct Docker SDK integration with concurrent operations:
+- **DockerManager** (`DockTUI/docker_mgmt/manager.py`): Handles direct Docker SDK integration with concurrent operations:
   - Thread-based non-blocking container operations
   - Parallel stats collection for all containers
   - Multi-stream log aggregation for stacks
-- **LogPane** (`dockerview/ui/viewers/log_pane.py`): Split-pane view with enhanced log streaming:
+- **LogPane** (`DockTUI/ui/viewers/log_pane.py`): Split-pane view with enhanced log streaming:
   - Real-time filtering with proper empty filter handling
   - Session-based log streaming to prevent duplicates
   - Configurable time ranges and tail limits
@@ -59,7 +59,7 @@ Docker Engine <-> docker-py SDK <-> DockerManager (with threading) <-> UI Compon
 ### Project Structure
 
 ```
-dockerview/
+DockTUI/
 ├── app.py                      # Main application and UI layout
 ├── docker_mgmt/               # Docker SDK integration layer
 │   ├── manager.py            # Core Docker management
@@ -110,20 +110,20 @@ poetry shell
 
 ```bash
 # Run normally
-python -m dockerview
+python -m DockTUI
 
 # Run with debug logging
-export DOCKERVIEW_DEBUG=1
-python -m dockerview
+export DOCKTUI_DEBUG=1
+python -m DockTUI
 # or
 ./start.sh -d
 ```
 
-Debug logs are written to `./logs/dockerview_debug.log`.
+Debug logs are written to `./logs/DockTUI_debug.log`.
 
 ## Code Quality and Testing
 
-dockerview uses automated tools to maintain code quality:
+DockTUI uses automated tools to maintain code quality:
 
 - **Black**: Code formatting (line length 88)
 - **isort**: Import sorting (black profile)
@@ -150,12 +150,12 @@ If you prefer running commands directly:
 
 ```bash
 # Format code
-poetry run black dockerview/
-poetry run isort dockerview/
+poetry run black DockTUI/
+poetry run isort DockTUI/
 
 # Check formatting
-poetry run black --check dockerview/
-poetry run isort --check-only dockerview/
+poetry run black --check DockTUI/
+poetry run isort --check-only DockTUI/
 
 # Run tests
 poetry run pytest
@@ -239,7 +239,7 @@ All checks must pass before merging pull requests.
 
 ## Release Process
 
-dockerview uses [release-please](https://github.com/googleapis/release-please) for automated versioning and releases. The project follows [Semantic Versioning](https://semver.org/).
+DockTUI uses [release-please](https://github.com/googleapis/release-please) for automated versioning and releases. The project follows [Semantic Versioning](https://semver.org/).
 
 ### Creating a Release
 
@@ -257,16 +257,16 @@ The release process is fully automated based on conventional commit messages.
 The following environment variables are available for development and debugging:
 
 #### Configuration Overrides
-- `DOCKERVIEW_CONFIG` - Path to custom configuration file
-- `DOCKERVIEW_APP_REFRESH_INTERVAL` - Container refresh rate in seconds
-- `DOCKERVIEW_LOG_MAX_LINES` - Maximum log lines in memory
-- `DOCKERVIEW_LOG_TAIL` - Initial log lines to fetch
-- `DOCKERVIEW_LOG_SINCE` - Time range for logs
-- `DOCKERVIEW_DEBUG` - Enable debug logging (set to 1)
+- `DOCKTUI_CONFIG` - Path to custom configuration file
+- `DOCKTUI_APP_REFRESH_INTERVAL` - Container refresh rate in seconds
+- `DOCKTUI_LOG_MAX_LINES` - Maximum log lines in memory
+- `DOCKTUI_LOG_TAIL` - Initial log lines to fetch
+- `DOCKTUI_LOG_SINCE` - Time range for logs
+- `DOCKTUI_DEBUG` - Enable debug logging (set to 1)
 
 #### Container Support
-- `DOCKERVIEW_IN_CONTAINER` - Set when running in a container
-- `DOCKERVIEW_CLIPBOARD_FILE` - File path for container clipboard sharing
+- `DOCKTUI_IN_CONTAINER` - Set when running in a container
+- `DOCKTUI_CLIPBOARD_FILE` - File path for container clipboard sharing
 
 ### Performance Considerations
 
@@ -277,8 +277,8 @@ The following environment variables are available for development and debugging:
 
 ## Debugging Tips
 
-1. Enable debug logging with `DOCKERVIEW_DEBUG=1`
-2. Check `./logs/dockerview_debug.log` for detailed operation logs
+1. Enable debug logging with `DOCKTUI_DEBUG=1`
+2. Check `./logs/DockTUI_debug.log` for detailed operation logs
 3. Use the command palette (Ctrl+\) to test individual actions
 4. Monitor the status bar for action availability and context
 

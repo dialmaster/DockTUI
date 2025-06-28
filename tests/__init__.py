@@ -1,1 +1,1 @@
-"""Test package for dockerview."""
+"""Test package for DockTUI."""

@@ -7,14 +7,14 @@ install:  ## Install dependencies
 	poetry install
 
 format:  ## Format code with autoflake, isort, and black
-	poetry run autoflake --remove-all-unused-imports --remove-unused-variables --in-place --recursive dockerview/
-	poetry run isort dockerview/
-	poetry run black dockerview/
+	poetry run autoflake --remove-all-unused-imports --remove-unused-variables --in-place --recursive DockTUI/
+	poetry run isort DockTUI/
+	poetry run black DockTUI/
 
 lint:  ## Check code formatting without making changes
-	poetry run autoflake --check --remove-all-unused-imports --remove-unused-variables --recursive dockerview/
-	poetry run isort --check-only dockerview/
-	poetry run black --check dockerview/
+	poetry run autoflake --check --remove-all-unused-imports --remove-unused-variables --recursive DockTUI/
+	poetry run isort --check-only DockTUI/
+	poetry run black --check DockTUI/
 
 test:  ## Run tests
 	poetry run pytest -v

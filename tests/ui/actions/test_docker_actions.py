@@ -6,14 +6,14 @@ from unittest.mock import MagicMock, Mock, call, patch
 
 import pytest
 
-from dockerview.ui.actions.docker_actions import DockerActions
+from DockTUI.ui.actions.docker_actions import DockerActions
 
 if TYPE_CHECKING:
-    from dockerview.app import DockerViewApp
+    from DockTUI.app import DockTUIApp
 
 
-class MockDockerViewApp(DockerActions):
-    """Mock DockerViewApp for testing DockerActions mixin."""
+class MockDockTUIApp(DockerActions):
+    """Mock DockTUIApp for testing DockerActions mixin."""
 
     def __init__(self):
         super().__init__()
@@ -39,13 +39,13 @@ class TestDockerActions:
 
     def test_init(self):
         """Test initialization of DockerActions."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         assert app._recreating_container_name is None
         assert app._recreating_item_type is None
 
     def test_is_action_applicable_no_selection(self):
         """Test is_action_applicable with no selection."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.selected_item = None
 
         result = app.is_action_applicable("start")
@@ -55,7 +55,7 @@ class TestDockerActions:
 
     def test_is_action_applicable_down_on_container(self):
         """Test is_action_applicable for down command on container."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.selected_item = ("container", "test-container")
 
         result = app.is_action_applicable("down")
@@ -67,7 +67,7 @@ class TestDockerActions:
 
     def test_is_action_applicable_down_on_stack(self):
         """Test is_action_applicable for down command on stack."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.selected_item = ("stack", "test-stack")
 
         result = app.is_action_applicable("down")
@@ -76,7 +76,7 @@ class TestDockerActions:
 
     def test_is_action_applicable_recreate_stack_no_compose_file(self):
         """Test is_action_applicable for recreate on stack without compose file."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.selected_item = ("stack", "test-stack")
         app.container_list.selected_stack_data = {
             "name": "test-stack",
@@ -92,7 +92,7 @@ class TestDockerActions:
 
     def test_is_action_applicable_recreate_stack_with_compose_file(self):
         """Test is_action_applicable for recreate on stack with compose file."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.selected_item = ("stack", "test-stack")
         app.container_list.selected_stack_data = {
             "name": "test-stack",
@@ -105,17 +105,17 @@ class TestDockerActions:
 
     def test_is_action_applicable_container_actions(self):
         """Test is_action_applicable for container actions."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.selected_item = ("container", "test-container")
 
         for action in ["start", "stop", "restart", "recreate"]:
             result = app.is_action_applicable(action)
             assert result is True
 
-    @patch("dockerview.ui.actions.docker_actions.threading.Thread")
+    @patch("DockTUI.ui.actions.docker_actions.threading.Thread")
     def test_execute_docker_command_container_start(self, mock_thread):
         """Test execute_docker_command for container start."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.selected_item = ("container", "test-container")
         app.container_list.selected_container_data = {"name": "my-container"}
         app.docker.execute_container_command.return_value = (True, "")
@@ -137,10 +137,10 @@ class TestDockerActions:
         mock_thread_instance.start.assert_called_once()
         assert mock_thread_instance.daemon is True
 
-    @patch("dockerview.ui.actions.docker_actions.threading.Thread")
+    @patch("DockTUI.ui.actions.docker_actions.threading.Thread")
     def test_execute_docker_command_container_stop(self, mock_thread):
         """Test execute_docker_command for container stop."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.selected_item = ("container", "test-container")
         app.container_list.selected_container_data = {"name": "my-container"}
         app.docker.execute_container_command.return_value = (True, "")
@@ -161,10 +161,10 @@ class TestDockerActions:
         mock_thread.assert_called_once()
         mock_thread_instance.start.assert_called_once()
 
-    @patch("dockerview.ui.actions.docker_actions.threading.Thread")
+    @patch("DockTUI.ui.actions.docker_actions.threading.Thread")
     def test_execute_docker_command_container_recreate(self, mock_thread):
         """Test execute_docker_command for container recreate."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.selected_item = ("container", "test-container")
         app.container_list.selected_container_data = {"name": "my-container"}
         app.docker.execute_container_command.return_value = (True, "")
@@ -186,7 +186,7 @@ class TestDockerActions:
 
     def test_execute_docker_command_stack_start(self):
         """Test execute_docker_command for stack start."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.selected_item = ("stack", "test-stack")
         app.container_list.selected_stack_data = {
             "name": "my-stack",
@@ -206,7 +206,7 @@ class TestDockerActions:
 
     def test_execute_docker_command_stack_down(self):
         """Test execute_docker_command for stack down."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.selected_item = ("stack", "test-stack")
         app.container_list.selected_stack_data = {
             "name": "my-stack",
@@ -223,7 +223,7 @@ class TestDockerActions:
 
     def test_execute_docker_command_stack_down_with_volumes(self):
         """Test execute_docker_command for stack down with volumes."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.selected_item = ("stack", "test-stack")
         app.container_list.selected_stack_data = {
             "name": "my-stack",
@@ -242,7 +242,7 @@ class TestDockerActions:
 
     def test_execute_docker_command_stack_recreate(self):
         """Test execute_docker_command for stack recreate."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.selected_item = ("stack", "test-stack")
         app.container_list.selected_stack_data = {
             "name": "my-stack",
@@ -262,7 +262,7 @@ class TestDockerActions:
 
     def test_execute_docker_command_no_stack_data(self):
         """Test execute_docker_command with missing stack data."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.selected_item = ("stack", "test-stack")
         app.container_list.selected_stack_data = None
 
@@ -275,7 +275,7 @@ class TestDockerActions:
 
     def test_execute_docker_command_unknown_type(self):
         """Test execute_docker_command with unknown item type."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.selected_item = ("unknown", "test-item")
 
         app.execute_docker_command("start")
@@ -284,7 +284,7 @@ class TestDockerActions:
 
     def test_execute_docker_command_failure(self):
         """Test execute_docker_command when docker command fails."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.selected_item = ("stack", "test-stack")
         app.container_list.selected_stack_data = {
             "name": "my-stack",
@@ -301,7 +301,7 @@ class TestDockerActions:
 
     def test_execute_docker_command_exception(self):
         """Test execute_docker_command with exception."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.selected_item = ("container", "test-container")
         app.container_list.selected_container_data = {"name": "my-container"}
         app.container_list.update_container_status.side_effect = Exception(
@@ -314,7 +314,7 @@ class TestDockerActions:
 
     def test_handle_post_recreate_container(self):
         """Test handle_post_recreate for container."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app._recreating_container_name = "my-container"
         app._recreating_item_type = "container"
 
@@ -340,7 +340,7 @@ class TestDockerActions:
 
     def test_handle_post_recreate_stack(self):
         """Test handle_post_recreate for stack."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app._recreating_container_name = "my-stack"
         app._recreating_item_type = "stack"
 
@@ -359,7 +359,7 @@ class TestDockerActions:
 
     def test_handle_post_recreate_no_tracking(self):
         """Test handle_post_recreate with no tracking variables."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app._recreating_container_name = None
         app._recreating_item_type = None
 
@@ -375,7 +375,7 @@ class TestDockerActions:
 
     def test_handle_post_recreate_no_log_pane(self):
         """Test handle_post_recreate when log_pane is None."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app._recreating_container_name = "my-container"
         app._recreating_item_type = "container"
         app.log_pane = None
@@ -388,7 +388,7 @@ class TestDockerActions:
 
     def test_handle_post_recreate_container_not_found(self):
         """Test handle_post_recreate when container not found."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app._recreating_container_name = "my-container"
         app._recreating_item_type = "container"
 
@@ -406,7 +406,7 @@ class TestDockerActions:
 
     def test_execute_image_command_remove_image_no_selection(self):
         """Test execute_image_command remove_image with no selection."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.selected_item = None
 
         app.execute_image_command("remove_image")
@@ -415,7 +415,7 @@ class TestDockerActions:
 
     def test_execute_image_command_remove_image_wrong_type(self):
         """Test execute_image_command remove_image with wrong item type."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.selected_item = ("container", "test-container")
 
         app.execute_image_command("remove_image")
@@ -426,7 +426,7 @@ class TestDockerActions:
 
     def test_execute_image_command_remove_image_no_data(self):
         """Test execute_image_command remove_image with no image data."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.selected_item = ("image", "test-image")
         app.container_list.image_manager = Mock()
         app.container_list.image_manager.selected_image_data = None
@@ -437,7 +437,7 @@ class TestDockerActions:
 
     def test_execute_image_command_remove_image_in_use(self):
         """Test execute_image_command remove_image when image is in use."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.selected_item = ("image", "test-image")
         app.container_list.image_manager = Mock()
         app.container_list.image_manager.selected_image_data = {
@@ -452,7 +452,7 @@ class TestDockerActions:
 
     def test_execute_image_command_remove_image_success(self):
         """Test execute_image_command remove_image successful removal."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.selected_item = ("image", "test-image")
         app.container_list.image_manager = Mock()
         app.container_list.image_manager.selected_image_data = {"container_names": []}
@@ -481,7 +481,7 @@ class TestDockerActions:
 
     def test_execute_image_command_remove_image_failure(self):
         """Test execute_image_command remove_image failed removal."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.selected_item = ("image", "test-image")
         app.container_list.image_manager = Mock()
         app.container_list.image_manager.selected_image_data = {"container_names": []}
@@ -494,7 +494,7 @@ class TestDockerActions:
 
     def test_execute_image_command_remove_unused_images_none_found(self):
         """Test execute_image_command remove_unused_images when none found."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.docker.get_unused_images.return_value = []
 
         app.execute_image_command("remove_unused_images")
@@ -503,7 +503,7 @@ class TestDockerActions:
 
     def test_execute_image_command_remove_unused_images_success(self):
         """Test execute_image_command remove_unused_images successful removal."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.image_manager = Mock()
         unused_images = [
             {"id": "image1"},
@@ -541,7 +541,7 @@ class TestDockerActions:
 
     def test_execute_image_command_remove_unused_images_failure(self):
         """Test execute_image_command remove_unused_images failed removal."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.image_manager = Mock()
         unused_images = [{"id": "image1"}]
         app.docker.get_unused_images.return_value = unused_images
@@ -558,7 +558,7 @@ class TestDockerActions:
 
     def test_execute_image_command_remove_unused_images_no_next_selection(self):
         """Test execute_image_command remove_unused_images with no next selection."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.image_manager = Mock()
         unused_images = [{"id": "image1"}]
         app.docker.get_unused_images.return_value = unused_images
@@ -576,10 +576,10 @@ class TestDockerActions:
         # Verify no selection update when next_selection is None
         app.container_list.image_manager.select_image.assert_not_called()
 
-    @patch("dockerview.ui.actions.docker_actions.threading.Thread")
+    @patch("DockTUI.ui.actions.docker_actions.threading.Thread")
     def test_execute_docker_command_thread_execution(self, mock_thread):
         """Test that container commands execute in background thread properly."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.selected_item = ("container", "test-container")
         app.container_list.selected_container_data = {"name": "my-container"}
 

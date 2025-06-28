@@ -37,28 +37,29 @@ jobs:
         path: .venv
         key: venv-${{ runner.os }}-${{ hashFiles('**/poetry.lock') }}
 
-    - name: Install dependencies
+    - name: Install dependencies (without cache)
       if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
-      run: poetry install --no-interaction --no-root
+      run: poetry install --no-interaction --with dev
 
-    - name: Install project
-      run: poetry install --no-interaction
+    - name: Install dependencies (with cache)
+      if: steps.cached-poetry-dependencies.outputs.cache-hit == 'true'
+      run: poetry install --no-interaction --no-root --with dev
 
     - name: Run autoflake unused imports check
       run: |
-        poetry run autoflake --check --remove-all-unused-imports --remove-unused-variables --recursive dockerview/
+        poetry run autoflake --check --remove-all-unused-imports --remove-unused-variables --recursive DockTUI/
 
     - name: Run isort import checker
       run: |
-        poetry run isort --check-only dockerview/
+        poetry run isort --check-only DockTUI/
 
     - name: Run Black formatter check
       run: |
-        poetry run black --check dockerview/
+        poetry run black --check DockTUI/
 
     - name: Run pytest with coverage
       run: |
-        poetry run pytest -v --cov=dockerview --cov-report=xml --cov-report=term-missing --cov-report=json
+        poetry run pytest -v --cov=DockTUI --cov-report=xml --cov-report=term-missing --cov-report=json
 
     - name: Generate coverage report
       if: always()
@@ -74,7 +75,7 @@ jobs:
         echo '```' >> $GITHUB_STEP_SUMMARY
         poetry run coverage report --skip-covered --sort=cover >> $GITHUB_STEP_SUMMARY
         echo '```' >> $GITHUB_STEP_SUMMARY
-        
+
         # Generate coverage report for PR comment
         if [ "${{ github.event_name }}" == "pull_request" ]; then
           echo "COVERAGE_REPORT<<EOF" >> $GITHUB_ENV
@@ -101,19 +102,19 @@ jobs:
         github-token: ${{ github.token }}
         script: |
           const coverageReport = process.env.COVERAGE_REPORT;
-          
+
           // Find existing coverage comment
           const comments = await github.rest.issues.listComments({
             issue_number: context.issue.number,
             owner: context.repo.owner,
             repo: context.repo.repo,
           });
-          
-          const botComment = comments.data.find(comment => 
-            comment.user.type === 'Bot' && 
+
+          const botComment = comments.data.find(comment =>
+            comment.user.type === 'Bot' &&
             comment.body.includes('## Detailed Coverage Report')
           );
-          
+
           if (botComment) {
             // Update existing comment
             await github.rest.issues.updateComment({
@@ -145,4 +146,4 @@ jobs:
 
     - name: Check for Python syntax errors or undefined names
       run: |
-        poetry run python -m py_compile dockerview/**/*.py
+        poetry run python -m py_compile DockTUI/**/*.py
