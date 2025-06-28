@@ -23,7 +23,7 @@ class DockerActions:
         """Check if an action is applicable to the current selection.
 
         Args:
-            action: The action to check (start, stop, restart, recreate, down)
+            action: The action to check (start, stop, restart, recreate, down, remove)
 
         Returns:
             bool: True if the action is applicable, False otherwise
@@ -40,6 +40,13 @@ class DockerActions:
             if item_type != "stack":
                 self.error_display.update(
                     "Down command only works on stacks, not individual containers"
+                )
+                return False
+
+        if action == "remove":
+            if item_type != "container":
+                self.error_display.update(
+                    "Remove command only works on containers, not stacks"
                 )
                 return False
 
@@ -64,7 +71,7 @@ class DockerActions:
         """Execute a Docker command on the selected item.
 
         Args:
-            command: The command to execute (start, stop, restart, recreate)
+            command: The command to execute (start, stop, restart, recreate, remove)
         """
         # Note: Validation is now done in is_action_applicable before calling this method
         item_type, item_id = self.container_list.selected_item
@@ -95,7 +102,11 @@ class DockerActions:
                 action_verb = (
                     "Recreating"
                     if command == "recreate"
-                    else f"{command.capitalize()}ing"
+                    else (
+                        "Removing"
+                        if command == "remove"
+                        else f"{command.capitalize()}ing"
+                    )
                 )
                 message = f"{action_verb} container: {item_name}"
 
@@ -105,6 +116,7 @@ class DockerActions:
                     "stop": "stopping...",
                     "restart": "restarting...",
                     "recreate": "recreating...",
+                    "remove": "removing...",
                 }
 
                 if command in status_map:

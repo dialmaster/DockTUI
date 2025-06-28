@@ -378,7 +378,7 @@ class DockerManager:
 
         Args:
             container_id: ID of the container to operate on
-            command: Command to execute (start, stop, restart, recreate)
+            command: Command to execute (start, stop, restart, recreate, remove)
 
         Returns:
             Tuple[bool, str]: (success, container_short_id) - True if successful, False otherwise
@@ -458,6 +458,8 @@ class DockerManager:
                         self._transition_states[container_id] = "stopping..."
                     elif command == "restart":
                         self._transition_states[container_id] = "restarting..."
+                    elif command == "remove":
+                        self._transition_states[container_id] = "removing..."
 
                 def run_container_command():
                     try:
@@ -470,6 +472,8 @@ class DockerManager:
                             container.stop()
                         elif command == "restart":
                             container.restart()
+                        elif command == "remove":
+                            container.remove(force=True)
                         else:
                             error_msg = f"Unknown container command: {command}"
                             logger.error(error_msg)

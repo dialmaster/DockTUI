@@ -415,19 +415,14 @@ class ContainerList(ContainerListBase):
                 first_table = self.stack_tables[first_header.stack_name]
                 first_table.styles.display = "block"
 
-                # If there are rows in the first table, select the first container
-                if first_table.row_count > 0:
-                    if should_focus:
-                        first_table.focus()
-                    first_table.move_cursor(row=0)
+                # Select the stack header only, not any container
+                self.select_stack(first_header.stack_name)
 
-                    # Get the container ID from the first row
-                    container_id = first_table.get_cell_at((0, 0))
-                    if container_id:
-                        self.select_container(container_id)
-                else:
-                    # If no containers, select the stack
-                    self.select_stack(first_header.stack_name)
+                # Ensure no row is selected in any table initially
+                for table in self.stack_tables.values():
+                    if table.row_count > 0:
+                        # Blur the table to remove cursor highlight
+                        table.blur()
         except Exception as e:
             logger.error(f"Error during ContainerList mount: {str(e)}", exc_info=True)
             raise
