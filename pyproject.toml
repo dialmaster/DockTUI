@@ -1,10 +1,11 @@
 [tool.poetry]
-name = "dockerview"
+name = "DockTUI"
 version = "0.1.6"
 description = "An interactive terminal dashboard for monitoring and managing Docker Compose environments"
 authors = ["Chris Dial <dial.chris@gmail.com>"]
 license = "MIT"
 readme = "README.md"
+packages = [{include = "DockTUI"}]
 
 [tool.poetry.dependencies]
 python = ">=3.8.1,<4.0"
@@ -27,7 +28,7 @@ requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.scripts]
-dockerview = "dockerview.app:main"
+DockTUI = "DockTUI.app:main"
 
 [tool.black]
 line-length = 88
@@ -50,7 +51,7 @@ python_files = ["test_*.py", "*_test.py"]
 addopts = "-v --tb=short"
 
 [tool.coverage.run]
-source = ["dockerview"]
+source = ["DockTUI"]
 omit = ["*/tests/*", "*/__init__.py", "*/__main__.py"]
 relative_files = true
 
@@ -70,16 +71,16 @@ exclude_lines = [
 
 [tool.poe.tasks]
 format = [
-    {cmd = "autoflake --remove-all-unused-imports --remove-unused-variables --in-place --recursive dockerview/"},
-    {cmd = "isort dockerview/"},
-    {cmd = "black dockerview/"}
+    {cmd = "autoflake --remove-all-unused-imports --remove-unused-variables --in-place --recursive DockTUI/"},
+    {cmd = "isort DockTUI/"},
+    {cmd = "black DockTUI/"}
 ]
 lint = [
-    {cmd = "autoflake --check --remove-all-unused-imports --remove-unused-variables --recursive dockerview/"},
-    {cmd = "isort --check-only dockerview/"},
-    {cmd = "black --check dockerview/"}
+    {cmd = "autoflake --check --remove-all-unused-imports --remove-unused-variables --recursive DockTUI/"},
+    {cmd = "isort --check-only DockTUI/"},
+    {cmd = "black --check DockTUI/"}
 ]
 test = "pytest -v"
-test-cov = "pytest -v --cov=dockerview --cov-report=term-missing --cov-report=html"
+test-cov = "pytest -v --cov=DockTUI --cov-report=term-missing --cov-report=html"
 check = ["lint", "test"]
 all = ["format", "test"]

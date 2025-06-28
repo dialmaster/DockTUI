@@ -7,14 +7,14 @@ from unittest.mock import MagicMock, Mock, call, patch
 
 import pytest
 
-from dockerview.ui.actions.refresh_actions import RefreshActions
+from DockTUI.ui.actions.refresh_actions import RefreshActions
 
 if TYPE_CHECKING:
-    from dockerview.app import DockerViewApp
+    from DockTUI.app import DockTUIApp
 
 
-class MockDockerViewApp(RefreshActions):
-    """Mock DockerViewApp for testing RefreshActions mixin."""
+class MockDockTUIApp(RefreshActions):
+    """Mock DockTUIApp for testing RefreshActions mixin."""
 
     def __init__(self):
         super().__init__()
@@ -24,7 +24,7 @@ class MockDockerViewApp(RefreshActions):
         self.docker = Mock()
         self.docker.last_error = None  # Set to None instead of Mock
         self.log_pane = Mock()
-        self.title = "Docker Monitor"
+        self.title = "DockTUI"
         self._worker_called = False
         self._worker_callback = None
         # Store the real implementation
@@ -47,12 +47,12 @@ class TestRefreshActions:
 
     def test_init(self):
         """Test initialization of RefreshActions."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         assert app._refresh_count == 0
 
     def test_refresh_containers_widgets_not_initialized(self):
         """Test refresh_containers when widgets are not initialized."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list = None
 
         # Run the async function synchronously
@@ -64,31 +64,31 @@ class TestRefreshActions:
 
     def test_refresh_containers_success(self):
         """Test successful refresh_containers call."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
 
         # Run the async function synchronously
         asyncio.run(app.refresh_containers())
 
         # Should update title and start worker
-        assert " - Refreshing..." in app.title
+        assert "Refreshing..." in app.title
         assert app._worker_called
         assert app._worker_callback is not None
 
     def test_refresh_containers_title_already_refreshing(self):
         """Test refresh_containers when title already shows refreshing."""
-        app = MockDockerViewApp()
-        app.title = "Docker Monitor - Refreshing..."
+        app = MockDockTUIApp()
+        app.title = "DockTUI\nRefreshing..."
 
         # Run the async function synchronously
         asyncio.run(app.refresh_containers())
 
         # Should not add another refreshing indicator
-        assert app.title == "Docker Monitor - Refreshing..."
+        assert app.title == "DockTUI\nRefreshing..."
         assert app._worker_called
 
     def test_refresh_containers_exception(self):
         """Test refresh_containers with exception."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
 
         # Make _refresh_containers_worker raise an exception
         def raise_error(callback):
@@ -96,7 +96,7 @@ class TestRefreshActions:
 
         app._refresh_containers_worker = raise_error
 
-        with patch("dockerview.ui.actions.refresh_actions.logger") as mock_logger:
+        with patch("DockTUI.ui.actions.refresh_actions.logger") as mock_logger:
             asyncio.run(app.refresh_containers())
 
             mock_logger.error.assert_called()
@@ -104,7 +104,7 @@ class TestRefreshActions:
 
     def test_refresh_containers_worker_success(self):
         """Test _refresh_containers_worker successful execution."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
 
         # Mock the docker methods
         app.docker.get_networks.return_value = {"net1": {"name": "net1"}}
@@ -123,11 +123,11 @@ class TestRefreshActions:
                 images = self.docker.get_images()
                 volumes = self.docker.get_volumes()
                 containers = self.docker.get_containers()
-                
+
                 self.call_from_thread(
                     callback, networks, stacks, images, volumes, containers
                 )
-                
+
                 return networks, stacks, images, volumes, containers
             except Exception as e:
                 self.call_from_thread(
@@ -166,7 +166,7 @@ class TestRefreshActions:
 
     def test_refresh_containers_worker_exception(self):
         """Test _refresh_containers_worker with exception."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.docker.get_networks.side_effect = Exception("Network error")
 
         callback = Mock()
@@ -179,11 +179,11 @@ class TestRefreshActions:
                 images = self.docker.get_images()
                 volumes = self.docker.get_volumes()
                 containers = self.docker.get_containers()
-                
+
                 self.call_from_thread(
                     callback, networks, stacks, images, volumes, containers
                 )
-                
+
                 return networks, stacks, images, volumes, containers
             except Exception as e:
                 self.call_from_thread(
@@ -191,7 +191,7 @@ class TestRefreshActions:
                 )
                 return {}, {}, {}, {}, []
 
-        with patch("dockerview.ui.actions.refresh_actions.logger") as mock_logger:
+        with patch("DockTUI.ui.actions.refresh_actions.logger") as mock_logger:
             result = test_worker(app, callback)
 
             app.error_display.update.assert_called_with(
@@ -203,7 +203,7 @@ class TestRefreshActions:
 
     def test_handle_refresh_results_success(self):
         """Test _handle_refresh_results successful execution."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app._sync_update_ui_with_results = Mock()
 
         networks = {"net1": {"name": "net1"}}
@@ -224,7 +224,7 @@ class TestRefreshActions:
 
     def test_handle_refresh_results_with_docker_error(self):
         """Test _handle_refresh_results when docker has last_error."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.docker.last_error = "Docker connection failed"
         app._sync_update_ui_with_results = Mock()
 
@@ -238,10 +238,10 @@ class TestRefreshActions:
 
     def test_handle_refresh_results_exception(self):
         """Test _handle_refresh_results with exception."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app._sync_update_ui_with_results = Mock(side_effect=Exception("UI error"))
 
-        with patch("dockerview.ui.actions.refresh_actions.logger") as mock_logger:
+        with patch("DockTUI.ui.actions.refresh_actions.logger") as mock_logger:
             app._handle_refresh_results({}, {}, {}, {}, [])
 
             mock_logger.error.assert_called()
@@ -249,7 +249,7 @@ class TestRefreshActions:
 
     def test_sync_update_ui_with_results_full_update(self):
         """Test _sync_update_ui_with_results with full data."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.images_section_collapsed = True
         app.container_list.image_manager = Mock()
         app.container_list.image_manager._preserve_selected_image_id = None
@@ -310,14 +310,14 @@ class TestRefreshActions:
         )
 
         # Verify title was updated
-        assert app.title == "Docker Monitor - 1 Networks, 1 Stacks, 2 Running, 1 Exited"
+        assert app.title == "DockTUI - 1 Networks, 1 Stacks, 2 Running, 1 Exited"
 
         # Verify refresh count incremented
         assert app._refresh_count == 1
 
     def test_sync_update_ui_with_results_no_images(self):
         """Test _sync_update_ui_with_results with no images."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.images_section_collapsed = False
         app.container_list.images_container = Mock()
         app.container_list.image_manager = Mock()
@@ -337,7 +337,7 @@ class TestRefreshActions:
 
     def test_sync_update_ui_with_results_preserve_image_selection(self):
         """Test _sync_update_ui_with_results preserving image selection."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.images_section_collapsed = True
         app.container_list.image_manager = Mock()
         app.container_list.image_manager._preserve_selected_image_id = "img1"
@@ -353,7 +353,7 @@ class TestRefreshActions:
 
     def test_sync_update_ui_with_results_handle_post_recreate(self):
         """Test _sync_update_ui_with_results calls handle_post_recreate."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.handle_post_recreate = Mock()
         app.container_list.image_manager = Mock()
         app.container_list.image_manager._preserve_selected_image_id = None
@@ -366,7 +366,7 @@ class TestRefreshActions:
 
     def test_sync_update_ui_with_results_update_selected_container(self):
         """Test _sync_update_ui_with_results updates selected container in log pane."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.selected_item = ("container", "c1")
         app.container_list.image_manager = Mock()
         app.container_list.image_manager._preserve_selected_image_id = None
@@ -383,7 +383,7 @@ class TestRefreshActions:
 
     def test_sync_update_ui_with_results_selected_container_not_found(self):
         """Test _sync_update_ui_with_results when selected container not in new data."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.selected_item = ("container", "c2")
         app.container_list.image_manager = Mock()
         app.container_list.image_manager._preserve_selected_image_id = None
@@ -397,7 +397,7 @@ class TestRefreshActions:
 
     def test_sync_update_ui_with_results_selected_item_not_container(self):
         """Test _sync_update_ui_with_results when selected item is not a container."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.selected_item = ("stack", "stack1")
         app.container_list.image_manager = Mock()
         app.container_list.image_manager._preserve_selected_image_id = None
@@ -411,7 +411,7 @@ class TestRefreshActions:
 
     def test_sync_update_ui_with_results_no_log_pane(self):
         """Test _sync_update_ui_with_results when log_pane is None."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.log_pane = None
         app.container_list.selected_item = ("container", "c1")
         app.container_list.image_manager = Mock()
@@ -424,13 +424,13 @@ class TestRefreshActions:
 
     def test_sync_update_ui_with_results_exception_in_update(self):
         """Test _sync_update_ui_with_results with exception during update."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.image_manager = Mock()
         app.container_list.image_manager._preserve_selected_image_id = None
         app.container_list.image_manager.image_rows = {}
         app.container_list.begin_update.side_effect = Exception("Update error")
 
-        with patch("dockerview.ui.actions.refresh_actions.logger") as mock_logger:
+        with patch("DockTUI.ui.actions.refresh_actions.logger") as mock_logger:
             app._sync_update_ui_with_results({}, {}, {}, {}, [])
 
             mock_logger.error.assert_called()
@@ -438,7 +438,7 @@ class TestRefreshActions:
 
     def test_sync_update_ui_with_results_exception_ensures_end_update(self):
         """Test _sync_update_ui_with_results calls end_update even on exception."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.image_manager = Mock()
         app.container_list.image_manager._preserve_selected_image_id = None
         app.container_list.image_manager.image_rows = {}
@@ -446,7 +446,7 @@ class TestRefreshActions:
 
         stacks = {"stack1": {"running": 1, "exited": 0, "total": 1}}
 
-        with patch("dockerview.ui.actions.refresh_actions.logger"):
+        with patch("DockTUI.ui.actions.refresh_actions.logger"):
             app._sync_update_ui_with_results({}, stacks, {}, {}, [])
 
             # Should still call end_update
@@ -455,7 +455,7 @@ class TestRefreshActions:
 
     def test_sync_update_ui_with_results_sorted_containers(self):
         """Test _sync_update_ui_with_results sorts containers by stack."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.image_manager = Mock()
         app.container_list.image_manager._preserve_selected_image_id = None
         app.container_list.image_manager.image_rows = {}
@@ -477,7 +477,7 @@ class TestRefreshActions:
 
     def test_sync_update_ui_with_results_no_handle_post_recreate(self):
         """Test _sync_update_ui_with_results when handle_post_recreate doesn't exist."""
-        app = MockDockerViewApp()
+        app = MockDockTUIApp()
         app.container_list.image_manager = Mock()
         app.container_list.image_manager._preserve_selected_image_id = None
         app.container_list.image_manager.image_rows = {}

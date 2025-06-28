@@ -5,7 +5,7 @@ repos:
     hooks:
       - id: autoflake
         args: [--remove-all-unused-imports, --remove-unused-variables, --in-place]
-        files: ^dockerview/.*\.py$
+        files: ^DockTUI/.*\.py$
 
   # isort - sort imports
   - repo: https://github.com/PyCQA/isort
@@ -13,14 +13,14 @@ repos:
     hooks:
       - id: isort
         args: ["--profile", "black"]
-        files: ^dockerview/.*\.py$
+        files: ^DockTUI/.*\.py$
 
   # black - code formatter
   - repo: https://github.com/psf/black
     rev: 24.1.1
     hooks:
       - id: black
-        files: ^dockerview/.*\.py$
+        files: ^DockTUI/.*\.py$
 
   # Run tests
   - repo: local

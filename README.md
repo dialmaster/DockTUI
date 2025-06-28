@@ -1,15 +1,15 @@
-# dockerview
+# DockTUI
 
 An interactive terminal dashboard for monitoring and managing Docker containers and Docker Compose environments.
 
-![dockerview_1](https://github.com/user-attachments/assets/f9936902-6240-414c-9530-65bfe1fbf457)
-![dockerview_2](https://github.com/user-attachments/assets/fc9f58e2-ca3a-4acb-ba52-932433326562)
-![dockerview_3](https://github.com/user-attachments/assets/68743925-7101-432f-90d3-c15df191515f)
-![docekrview_4](https://github.com/user-attachments/assets/6d8c8eb2-a03f-4474-b4cb-a5e0be33e806)
+![DockTUI_screenshot_1](https://github.com/user-attachments/assets/f9936902-6240-414c-9530-65bfe1fbf457)
+![DockTUI_screenshot_2](https://github.com/user-attachments/assets/fc9f58e2-ca3a-4acb-ba52-932433326562)
+![DockTUI_screenshot_3](https://github.com/user-attachments/assets/68743925-7101-432f-90d3-c15df191515f)
+![DockTUI_screenshot_4](https://github.com/user-attachments/assets/6d8c8eb2-a03f-4474-b4cb-a5e0be33e806)
 
-## What is dockerview?
+## What is DockTUI?
 
-dockerview is a terminal user interface (TUI) that provides a real-time dashboard for your Docker containers, similar to Docker Desktop but in your terminal. It lets you monitor container status, view logs, manage containers and stacks, and track resource usage - all with simple keyboard shortcuts.
+DockTUI is a terminal user interface (TUI) that provides a real-time dashboard for your Docker containers, similar to Docker Desktop but in your terminal. It lets you monitor container status, view logs, manage containers and stacks, and track resource usage - all with simple keyboard shortcuts.
 
 ## Features
 
@@ -34,10 +34,10 @@ dockerview is a terminal user interface (TUI) that provides a real-time dashboar
 
 ```bash
 # Clone the repository
-git clone https://github.com/dialmaster/dockerview.git
-cd dockerview
+git clone https://github.com/dialmaster/DockTUI.git
+cd DockTUI
 
-# Run dockerview (automatically installs dependencies)
+# Run DockTUI (automatically installs dependencies)
 ./start.sh
 ```
 
@@ -62,8 +62,8 @@ pip install poetry
 # Install dependencies
 poetry install
 
-# Run dockerview
-poetry run dockerview
+# Run DockTUI
+poetry run DockTUI
 ```
 
 ## Usage
@@ -99,14 +99,14 @@ poetry run dockerview
 
 ## Configuration
 
-dockerview can be customized through a YAML configuration file. A default `dockerview.yaml` is included.
+DockTUI can be customized through a YAML configuration file. A default `DockTUI.yaml` is included.
 
 ### Configuration Locations
 
-dockerview looks for configuration in this order:
-1. Path in `DOCKERVIEW_CONFIG` environment variable
-2. `./dockerview.yaml` (included default)
-3. `~/.config/dockerview/dockerview.yaml`
+DockTUI looks for configuration in this order:
+1. Path in `DOCKTUI_CONFIG` environment variable
+2. `./DockTUI.yaml` (included default)
+3. `~/.config/DockTUI/DockTUI.yaml`
 
 ### Basic Settings
 
@@ -132,18 +132,18 @@ Override configuration with environment variables:
 
 ```bash
 # Change refresh rate
-export DOCKERVIEW_APP_REFRESH_INTERVAL=10.0
+export DOCKTUI_APP_REFRESH_INTERVAL=10.0
 
 # Adjust log settings
-export DOCKERVIEW_LOG_TAIL=500
-export DOCKERVIEW_LOG_SINCE=1h
+export DOCKTUI_LOG_TAIL=500
+export DOCKTUI_LOG_SINCE=1h
 
 ./start.sh
 ```
 
 ## Clipboard Support
 
-dockerview supports copying log text to your clipboard:
+DockTUI supports copying log text to your clipboard:
 
 ### Local Setup
 Works automatically on most systems. For Linux/WSL2, install `xclip`:
@@ -153,13 +153,13 @@ sudo apt-get install xclip
 ```
 
 ### Running in Docker
-When running dockerview inside a container, use file-based clipboard:
+When running DockTUI inside a container, use file-based clipboard:
 
 ```bash
 docker run -v /tmp/clipboard:/tmp/clipboard \
-           -e DOCKERVIEW_IN_CONTAINER=1 \
-           -e DOCKERVIEW_CLIPBOARD_FILE=/tmp/clipboard/clipboard.txt \
-           dockerview
+           -e DOCKTUI_IN_CONTAINER=1 \
+           -e DOCKTUI_CLIPBOARD_FILE=/tmp/clipboard/clipboard.txt \
+           DockTUI
 ```
 
 ## Troubleshooting
@@ -171,7 +171,7 @@ docker run -v /tmp/clipboard:/tmp/clipboard \
 - Check permissions: You may need to add your user to the docker group
 
 **"docker compose command not found"**
-- dockerview requires Docker Compose v2
+- DockTUI requires Docker Compose v2
 - Update Docker to get the integrated `docker compose` command
 
 **Clipboard not working**
@@ -189,11 +189,11 @@ Enable detailed logging to troubleshoot issues:
 ```bash
 ./start.sh -d
 # or
-export DOCKERVIEW_DEBUG=1
-python -m dockerview
+export DOCKTUI_DEBUG=1
+python -m DockTUI
 ```
 
-Debug logs are saved to `./logs/dockerview_debug.log`.
+Debug logs are saved to `./logs/DockTUI_debug.log`.
 
 ## Limitations
 

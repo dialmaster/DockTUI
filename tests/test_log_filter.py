@@ -2,7 +2,7 @@
 
 import pytest
 
-from dockerview.services.log_filter import LogFilter
+from DockTUI.services.log_filter import LogFilter
 
 
 class TestLogFilter:
@@ -62,11 +62,11 @@ class TestLogFilter:
     def test_buffer_max_lines_overflow(self):
         """Test that buffer respects max_lines limit."""
         log_filter = LogFilter(max_lines=5)
-        
+
         # Add more lines than max_lines
         for i in range(10):
             log_filter.add_line(f"Line {i}")
-        
+
         # Should only keep the last 5 lines
         assert len(log_filter.all_log_lines) == 5
         expected_lines = [f"Line {i}" for i in range(5, 10)]
@@ -108,7 +108,7 @@ class TestLogFilter:
     def test_matches_filter_case_insensitive(self, log_filter):
         """Test case-insensitive filter matching."""
         log_filter.set_filter("ERROR")
-        
+
         assert log_filter.matches_filter("Error in application")
         assert log_filter.matches_filter("error in application")
         assert log_filter.matches_filter("ERROR in application")
@@ -118,11 +118,11 @@ class TestLogFilter:
     def test_matches_filter_marker_always_shown(self, log_filter):
         """Test that marker lines always match regardless of filter."""
         log_filter.set_filter("error")
-        
+
         # Marker line should always match
         assert log_filter.matches_filter("------ MARKED at 2024-01-01 ------")
         assert log_filter.matches_filter("Some text ------ MARKED timestamp")
-        
+
         # Non-marker lines follow normal filter rules
         assert not log_filter.matches_filter("This is a warning")
         assert log_filter.matches_filter("This is an error")
@@ -131,7 +131,7 @@ class TestLogFilter:
         """Test getting all lines when no filter is set."""
         lines = ["Line 1", "Line 2", "Line 3"]
         log_filter.add_lines(lines)
-        
+
         filtered = log_filter.get_filtered_lines()
         assert filtered == lines
         assert log_filter.get_filtered_line_count() == 3
@@ -145,10 +145,10 @@ class TestLogFilter:
             "Info: All good",
             "Debug: Error count = 0"
         ])
-        
+
         log_filter.set_filter("error")
         filtered = log_filter.get_filtered_lines()
-        
+
         assert len(filtered) == 3
         assert "Error in module A" in filtered
         assert "Error in module C" in filtered
@@ -166,16 +166,16 @@ class TestLogFilter:
             "Line 5",
             "Line 6"
         ])
-        
+
         # Set filter that doesn't match any regular lines
         log_filter.set_filter("xyz")
         filtered = log_filter.get_filtered_lines()
-        
+
         # Should include marker and 2 lines before/after
         assert len(filtered) == 5
         expected = [
             "Line 1",
-            "Line 2", 
+            "Line 2",
             "------ MARKED at timestamp ------",
             "Line 4",
             "Line 5"
@@ -193,10 +193,10 @@ class TestLogFilter:
             "------ MARKED 2 ------",
             "Line 6"
         ])
-        
+
         log_filter.set_filter("xyz")  # Filter that matches nothing
         filtered = log_filter.get_filtered_lines()
-        
+
         # Should include both markers and their context
         # Marker 1: Line 0, marker, Line 2, Line 3
         # Marker 2: Line 4, marker, Line 6
@@ -212,13 +212,13 @@ class TestLogFilter:
             "Line 2",
             "Line 3"
         ])
-        
+
         log_filter.set_filter("xyz")
         filtered = log_filter.get_filtered_lines()
         # Should show marker + 2 after (no lines before)
         assert len(filtered) == 3
         assert filtered[0] == "------ MARKED start ------"
-        
+
         # Marker at end
         log_filter.clear()
         log_filter.add_lines([
@@ -227,7 +227,7 @@ class TestLogFilter:
             "Line 2",
             "------ MARKED end ------"
         ])
-        
+
         filtered = log_filter.get_filtered_lines()
         # Should show 2 before + marker (no lines after)
         assert len(filtered) == 3
@@ -238,14 +238,14 @@ class TestLogFilter:
         # Test marker line starts context
         assert log_filter.should_show_line_with_context("------ MARKED test ------")
         assert log_filter.pending_marker_context == 2
-        
+
         # Next 2 lines should be shown due to context
         assert log_filter.should_show_line_with_context("Line after marker 1")
         assert log_filter.pending_marker_context == 1
-        
+
         assert log_filter.should_show_line_with_context("Line after marker 2")
         assert log_filter.pending_marker_context == 0
-        
+
         # Context exhausted, should use normal filter
         log_filter.set_filter("error")
         assert not log_filter.should_show_line_with_context("Normal line")
@@ -259,9 +259,9 @@ class TestLogFilter:
             "Line 2",
             "------ MARKED test ------"
         ])
-        
+
         log_filter.set_filter("xyz")  # Filter that matches nothing
-        
+
         # Should show line because marker is within 3 lines
         assert log_filter.should_show_line_with_context("New line")
 
@@ -278,11 +278,11 @@ class TestLogFilter:
             "2024-01-01 ERROR: Query failed",
             "2024-01-01 INFO: Application stopped"
         ])
-        
+
         # Filter for ERROR
         log_filter.set_filter("ERROR")
         filtered = log_filter.get_filtered_lines()
-        
+
         # Should include:
         # - Both ERROR lines
         # - Marker line and its context (2 before, 2 after)
@@ -306,18 +306,18 @@ class TestLogFilter:
         # Add lines and set filter
         log_filter.add_lines(["Error 1", "Info 1", "Error 2"])
         log_filter.set_filter("Error")
-        
+
         # Get filtered lines multiple times
         filtered1 = log_filter.get_filtered_lines()
         filtered2 = log_filter.get_filtered_lines()
-        
+
         # Results should be consistent
         assert filtered1 == filtered2
         assert log_filter.get_filtered_line_count() == 2
-        
+
         # Add more lines
         log_filter.add_line("Error 3")
         filtered3 = log_filter.get_filtered_lines()
-        
+
         assert len(filtered3) == 3
         assert log_filter.get_filtered_line_count() == 3
