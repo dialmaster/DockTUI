@@ -5,6 +5,61 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.7](https://github.com/dialmaster/DockTUI/compare/v0.1.6...v0.1.7) (2025-06-29)
+
+
+### Features
+
+* add test coverage reporting to CI/CD pipeline ([a31f300](https://github.com/dialmaster/DockTUI/commit/a31f300bc2093179be215d403baa89953c5b0027))
+* add volume removal functionality with UI integration ([a5f2bb2](https://github.com/dialmaster/DockTUI/commit/a5f2bb2225ae19b47e6a5556c6de4fa43934f53d))
+* change name to DockTUI ([ee6a68c](https://github.com/dialmaster/DockTUI/commit/ee6a68c607b38b52eff121520c23e3dc16a7dcc3))
+* change name to DockTUI ([09ac1ba](https://github.com/dialmaster/DockTUI/commit/09ac1baf5a0fc2e4d1924f470d284acf7f5ec3e5))
+* **ci:** add custom detailed coverage report comment for all PRs ([e50d062](https://github.com/dialmaster/DockTUI/commit/e50d0623edf28f9e15f924b2816bbb89b4f88960))
+* **ci:** add detailed per-file coverage reports to GitHub workflow ([8ff286b](https://github.com/dialmaster/DockTUI/commit/8ff286ba39a1f5157df3e1b15155ff0f067ace30))
+* **ci:** add detailed per-file coverage reports to GitHub workflow ([5cca75b](https://github.com/dialmaster/DockTUI/commit/5cca75b2f50e1171c571937f3c34199f7c7aab32))
+* container enhancements ([a556353](https://github.com/dialmaster/DockTUI/commit/a55635392fae5d526c67d9c6a91541aa688709a2))
+* display volume usage information in volumes table ([be1853b](https://github.com/dialmaster/DockTUI/commit/be1853b862af3a819464e15a6ad24b4d69609a13))
+* Log pane exited container ([127c033](https://github.com/dialmaster/DockTUI/commit/127c033fbbc33d0d5e808edad071298aca1a78a0))
+* make image removal operations non-blocking ([c44b691](https://github.com/dialmaster/DockTUI/commit/c44b691378de9c49fe1758b330f2e3109a5b23ce))
+* Rename application to "DockTUI" ([6269dc9](https://github.com/dialmaster/DockTUI/commit/6269dc9ef6d952bccaa3de66e071c6128853d0b4))
+* Rename application to "DockTUI" ([f693cff](https://github.com/dialmaster/DockTUI/commit/f693cffd41d50a02272c7d72028404693ee01f9b))
+* **ui:** app title refreshing ([b25c672](https://github.com/dialmaster/DockTUI/commit/b25c672de1f3cda4542f109f18db02098c3cb56b))
+* **ui:** app title refreshing ([7e3bd84](https://github.com/dialmaster/DockTUI/commit/7e3bd842f550760fa93ef36d941325a45afbacc5))
+* volume ui and handling enhancements ([71a7df6](https://github.com/dialmaster/DockTUI/commit/71a7df661c09fc111ef5bfc37f86b4e9f1d05c9d))
+
+
+### Bug Fixes
+
+* add relative_files setting to coverage configuration ([7a11157](https://github.com/dialmaster/DockTUI/commit/7a111577fa24324afa69f4fdeb39a776e8bd236a))
+* broken workflows after DockTUI name change ([c4e12b3](https://github.com/dialmaster/DockTUI/commit/c4e12b3a9d69e2b18856e3fc4c97fa47ed2a5a22))
+* PR coverage permissions ([971b6ce](https://github.com/dialmaster/DockTUI/commit/971b6ce9915ed5a303be1a54bd9f369587ae7b05))
+
+
+### Refactoring
+
+* extract footer formatting and navigation handling into separate components ([5ba43ec](https://github.com/dialmaster/DockTUI/commit/5ba43ec67fd3959c56161c8620f4e9522716643b))
+
+
+### Documentation
+
+* readme update ([3e4a53d](https://github.com/dialmaster/DockTUI/commit/3e4a53df6a2d9e89edbbff9db3e167f3dde399aa))
+
+
+### Tests
+
+* add test coverage for clipboard ([941e7f2](https://github.com/dialmaster/DockTUI/commit/941e7f24a2a515ec6a941530d52a441038fc724a))
+* add test coverage for docker_actions.py ([017faf5](https://github.com/dialmaster/DockTUI/commit/017faf5e0de910cb925261a4c489b8c4374cb633))
+* add test coverage for log_filter.py ([932082d](https://github.com/dialmaster/DockTUI/commit/932082ddf25b1cf0a09f8c8eb4cbdb0244748524))
+* add test coverage for log_filter.py ([0b15434](https://github.com/dialmaster/DockTUI/commit/0b15434fb96905945d649406dd20337d04290a65))
+* coverage for app.py ([f78ebee](https://github.com/dialmaster/DockTUI/commit/f78ebeeab6d885f80e714bc670efca7c317c6a66))
+* coverage for containers.py ([d95d363](https://github.com/dialmaster/DockTUI/commit/d95d363929dc40e890f659ac878154869e34ed92))
+* coverage for DockerManager ([06dd77f](https://github.com/dialmaster/DockTUI/commit/06dd77f78606fb2ffe017d4e2196e3b929ed9a49))
+* coverage for header widget ([7ee6bb5](https://github.com/dialmaster/DockTUI/commit/7ee6bb5513493bed2f5b90a8dba85ed24483d4cf))
+* coverage for image manager ([1019314](https://github.com/dialmaster/DockTUI/commit/1019314e2685abfd13a873e3f86f9bca9e1185b8))
+* coverage for log_streamer.py ([3ae9833](https://github.com/dialmaster/DockTUI/commit/3ae9833cad3f834e35392a067781a8357b9ff264))
+* coverage for refresh_actions.py ([04fcc4b](https://github.com/dialmaster/DockTUI/commit/04fcc4b808fb1daaaeef4af1b90c5459e97d1b49))
+* coverage for stack manager ([4dd91bb](https://github.com/dialmaster/DockTUI/commit/4dd91bb72b1065dcdd54beb7d18c51bc9a58bc06))
+
 ## [0.1.6](https://github.com/dialmaster/DockTUI/compare/v0.1.5...v0.1.6) (2025-06-25)
 
 
