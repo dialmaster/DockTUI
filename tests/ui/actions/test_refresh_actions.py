@@ -70,20 +70,22 @@ class TestRefreshActions:
         asyncio.run(app.refresh_containers())
 
         # Should update title and start worker
-        assert "Refreshing..." in app.title
+        assert "Refreshing..." in app.sub_title
         assert app._worker_called
         assert app._worker_callback is not None
 
     def test_refresh_containers_title_already_refreshing(self):
         """Test refresh_containers when title already shows refreshing."""
         app = MockDockTUIApp()
-        app.title = "DockTUI\nRefreshing..."
+        app.title = "DockTUI"
+        app.sub_title = "\nRefreshing..."
 
         # Run the async function synchronously
         asyncio.run(app.refresh_containers())
 
         # Should not add another refreshing indicator
-        assert app.title == "DockTUI\nRefreshing..."
+        assert app.title == "DockTUI"
+        assert app.sub_title == "\nRefreshing..."
         assert app._worker_called
 
     def test_refresh_containers_exception(self):
