@@ -26,6 +26,10 @@ class DockerManager:
                 {}
             )  # {container_id: "starting..." or "stopping..."}
             self._transition_lock = threading.Lock()
+            # Track volume usage across containers
+            self._volume_usage = defaultdict(
+                set
+            )  # volume_name -> set of container names
         except Exception as e:
             logger.error(f"Failed to initialize Docker client: {str(e)}", exc_info=True)
             raise
@@ -88,6 +92,9 @@ class DockerManager:
             }
         )
 
+        # Track volume usage across all containers
+        self._volume_usage = defaultdict(set)  # volume_name -> set of container names
+
         try:
             containers = self.client.containers.list(all=True)
 
@@ -114,6 +121,13 @@ class DockerManager:
                         stacks[project]["running"] += 1
                     elif "exited" in container.status:
                         stacks[project]["exited"] += 1
+
+                    # Track volume usage for this container
+                    if hasattr(container, "attrs") and "Mounts" in container.attrs:
+                        for mount in container.attrs["Mounts"]:
+                            if mount.get("Type") == "volume" and "Name" in mount:
+                                volume_name = mount["Name"]
+                                self._volume_usage[volume_name].add(container.name)
 
                 except Exception as container_error:
                     logger.error(
@@ -613,6 +627,8 @@ class DockerManager:
                 - labels: Volume labels
                 - stack: Associated Docker Compose stack name (if any)
                 - scope: Volume scope
+                - in_use: Whether the volume is mounted by any container
+                - container_count: Number of containers using this volume
         """
         volumes = {}
         try:
@@ -627,6 +643,14 @@ class DockerManager:
                     # Determine stack association from labels
                     stack_name = labels.get("com.docker.compose.project", None)
 
+                    # Check if volume is in use (from previously collected data)
+                    container_names = (
+                        self._volume_usage.get(volume.name, set())
+                        if hasattr(self, "_volume_usage")
+                        else set()
+                    )
+                    in_use = len(container_names) > 0
+
                     volumes[volume.name] = {
                         "name": volume.name,
                         "driver": attrs.get("Driver", "unknown"),
@@ -635,6 +659,11 @@ class DockerManager:
                         "labels": labels,
                         "stack": stack_name,
                         "scope": attrs.get("Scope", "local"),
+                        "in_use": in_use,
+                        "container_count": len(container_names),
+                        "container_names": sorted(
+                            list(container_names)
+                        ),  # Convert set to sorted list
                     }
 
                     logger.debug(

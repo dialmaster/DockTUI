@@ -3,10 +3,11 @@
 import logging
 from typing import Dict, Optional
 
-from textual.containers import Container
+from rich.text import Text
+from textual.widgets import DataTable, Static
 
 from ..base.container_list_base import SelectionChanged
-from ..widgets.headers import VolumeHeader
+from ..widgets.headers import SectionHeader
 
 logger = logging.getLogger("DockTUI.volume_manager")
 
@@ -21,13 +22,18 @@ class VolumeManager:
             parent: The parent ContainerList widget
         """
         self.parent = parent
-        self.volume_headers: Dict[str, VolumeHeader] = {}
-        self.expanded_volumes = set()
+        self.volume_table: Optional[DataTable] = None
+        self.volume_rows: Dict[str, int] = {}  # volume_name -> row_key
         self._volumes_in_new_data = set()
         self.selected_volume_data: Optional[Dict] = None
+        self.volume_section_header: Optional[SectionHeader] = None
+        self._table_initialized = False
+        self.loading_message: Optional[Static] = None
+        self._pending_volumes: Dict[str, dict] = {}  # Collect volumes before sorting
+        self._volume_data: Dict[str, dict] = {}  # Store volume data by name
 
     def add_volume(self, volume_data: dict) -> None:
-        """Add or update a volume section in the container list.
+        """Add a volume to pending volumes for later sorting and display.
 
         Args:
             volume_data: Dictionary containing volume information
@@ -37,65 +43,64 @@ class VolumeManager:
         # Track that this volume exists in the new data
         self._volumes_in_new_data.add(volume_name)
 
-        if volume_name not in self.volume_headers:
-            header = VolumeHeader(
-                volume_name,
-                volume_data["driver"],
-                volume_data["mountpoint"],
-                volume_data["created"],
-                volume_data["stack"],
-                volume_data["scope"],
+        # Store in pending volumes
+        self._pending_volumes[volume_name] = volume_data
+
+        # Update selected volume data if this is the selected volume
+        if (
+            self.parent.selected_item
+            and self.parent.selected_item[0] == "volume"
+            and self.parent.selected_item[1] == volume_name
+        ):
+            self.selected_volume_data = volume_data
+
+    def _initialize_table(self) -> None:
+        """Initialize and mount the volume data table."""
+        if self.parent.volumes_container and not self._table_initialized:
+            # Hide loading message if it exists
+            self.hide_loading_message()
+
+            self.volume_table = DataTable(
+                show_header=True,
+                header_height=1,
+                zebra_stripes=True,
+                show_cursor=True,
+                cursor_type="row",
+                id="volume-table",
             )
 
-            self.volume_headers[volume_name] = header
-            # No table needed for volumes since they don't expand
+            # Add columns
+            self.volume_table.add_column("Name", key="name", width=30)
+            self.volume_table.add_column(
+                "Mount Point", key="mount"
+            )  # No width limit for mount point
+            self.volume_table.add_column("Stack", key="stack", width=20)
+            self.volume_table.add_column("In Use", key="in_use", width=8)
+            self.volume_table.add_column("Containers", key="containers", width=40)
+            self.volume_table.add_column("Driver", key="driver", width=15)
 
-            # Update selected volume data if this is the selected volume
-            if (
-                self.parent.selected_item
-                and self.parent.selected_item[0] == "volume"
-                and self.parent.selected_item[1] == volume_name
-            ):
-                self.selected_volume_data = volume_data
-        else:
-            # Update existing volume
-            header = self.volume_headers[volume_name]
-            header.driver = volume_data["driver"]
-            header.mountpoint = volume_data["mountpoint"]
-            header.created = volume_data["created"]
-            header.stack = volume_data["stack"]
-            header.scope = volume_data["scope"]
-            header._update_content()
+            # Mount the table in the volumes container
+            self.parent.volumes_container.mount(self.volume_table)
+            self._table_initialized = True
 
-            # Update selected volume data if this is the selected volume
-            if (
-                self.parent.selected_item
-                and self.parent.selected_item[0] == "volume"
-                and self.parent.selected_item[1] == volume_name
-            ):
-                self.selected_volume_data = volume_data
+            # Ensure table is visible
+            self.volume_table.display = True
+            self.volume_table.styles.width = "100%"
 
     def remove_volume(self, volume_name: str) -> None:
-        """Remove a volume and its associated UI elements.
+        """Remove a volume from the table.
 
         Args:
             volume_name: Name of the volume to remove
         """
-        self.expanded_volumes.discard(volume_name)
+        if volume_name in self.volume_rows and self.volume_table:
+            row_key = self.volume_rows[volume_name]
+            self.volume_table.remove_row(row_key)
+            del self.volume_rows[volume_name]
 
-        if self.parent.volumes_container:
-            for child in list(self.parent.volumes_container.children):
-                if isinstance(child, Container) and "volume-container" in child.classes:
-                    for widget in child.children:
-                        if (
-                            isinstance(widget, VolumeHeader)
-                            and widget.volume_name == volume_name
-                        ):
-                            child.remove()
-                            break
-
-        if volume_name in self.volume_headers:
-            del self.volume_headers[volume_name]
+        # Remove from volume data
+        if volume_name in self._volume_data:
+            del self._volume_data[volume_name]
 
         if (
             self.parent.selected_item
@@ -111,24 +116,16 @@ class VolumeManager:
         Args:
             volume_name: Name of the volume to select
         """
-        if volume_name in self.volume_headers:
+        if volume_name in self.volume_rows and self.volume_table:
             # Clear any previous selection
             self.parent.selected_item = ("volume", volume_name)
             self.parent.selected_container_data = None
             self.parent.selected_stack_data = None
             self.parent.selected_network_data = None
 
-            # Store volume data for footer display
-            header = self.volume_headers[volume_name]
-            self.selected_volume_data = {
-                "name": volume_name,
-                "driver": header.driver,
-                "mountpoint": header.mountpoint,
-                "created": header.created,
-                "stack": header.stack,
-                "scope": header.scope,
-            }
-            self.parent.selected_volume_data = self.selected_volume_data
+            # Move cursor to the selected volume
+            row_key = self.volume_rows[volume_name]
+            self.volume_table.move_cursor(row=row_key)
 
             # Update the footer and cursor visibility
             self.parent._update_footer_with_selection()
@@ -142,47 +139,253 @@ class VolumeManager:
     def reset_tracking(self) -> None:
         """Reset tracking for new data updates."""
         self._volumes_in_new_data = set()
-
-    def save_expanded_state(self) -> None:
-        """Save the current expanded state of volumes."""
-        self.expanded_volumes = {
-            name for name, header in self.volume_headers.items() if header.expanded
-        }
+        self._pending_volumes.clear()
+        self._volume_data.clear()
 
     def cleanup_removed_volumes(self) -> None:
         """Remove volumes that no longer exist."""
         volumes_to_remove = []
-        for volume_name in list(self.volume_headers.keys()):
+        for volume_name in list(self.volume_rows.keys()):
             if volume_name not in self._volumes_in_new_data:
                 volumes_to_remove.append(volume_name)
 
         for volume_name in volumes_to_remove:
             self.remove_volume(volume_name)
 
-    def get_existing_containers(self) -> dict:
-        """Get existing volume containers for updates."""
-        existing_volume_containers = {}
-        if self.parent.volumes_container:
-            for child in self.parent.volumes_container.children:
-                if isinstance(child, Container) and "volume-container" in child.classes:
-                    for widget in child.children:
-                        if isinstance(widget, VolumeHeader):
-                            existing_volume_containers[widget.volume_name] = child
-                            break
-        return existing_volume_containers
+    def flush_pending_volumes(self) -> None:
+        """Add all pending volumes to the table in sorted order."""
+        if not self._pending_volumes:
+            return
 
-    def prepare_new_containers(self) -> dict:
-        """Prepare new volume containers to be added."""
-        new_volume_containers = {}
-        existing_containers = self.get_existing_containers()
+        # Initialize table if needed and container is mounted
+        if (
+            not self._table_initialized
+            and self.parent.volumes_container
+            and self.parent.volumes_container.parent
+        ):
+            self._initialize_table()
 
-        for volume_name in sorted(self.volume_headers.keys()):
-            if volume_name not in existing_containers:
-                header = self.volume_headers[volume_name]
-                volume_container = Container(classes="volume-container")
-                new_volume_containers[volume_name] = (
-                    volume_container,
-                    header,
-                    None,  # No table for volumes
+        if not self._table_initialized:
+            return
+
+        logger.debug(
+            f"flush_pending_volumes: Processing {len(self._pending_volumes)} volumes"
+        )
+
+        # Sort volumes: in-use first, then by name descending
+        sorted_volumes = sorted(
+            self._pending_volumes.items(),
+            key=lambda x: (
+                0 if x[1].get("in_use", False) else 1,  # In-use volumes get 0
+                x[0].lower(),  # Volume name for secondary sort
+            ),
+        )
+
+        # Reverse name order within each group
+        in_use_volumes = []
+        not_in_use_volumes = []
+
+        for volume_name, volume_data in sorted_volumes:
+            if volume_data.get("in_use", False):
+                in_use_volumes.append((volume_name, volume_data))
+            else:
+                not_in_use_volumes.append((volume_name, volume_data))
+
+        # Reverse each group for descending name order
+        in_use_volumes.reverse()
+        not_in_use_volumes.reverse()
+
+        # Combine groups
+        sorted_volumes = in_use_volumes + not_in_use_volumes
+
+        logger.debug(
+            f"flush_pending_volumes: {len(in_use_volumes)} in-use, {len(not_in_use_volumes)} not in-use"
+        )
+
+        # Add volumes to table in sorted order
+        for volume_name, volume_data in sorted_volumes:
+            # Format the data for display
+            stack_text = volume_data["stack"] if volume_data["stack"] else "None"
+            in_use_text = "Yes" if volume_data.get("in_use", False) else "No"
+            mount_display = volume_data["mountpoint"]
+
+            # Format container names
+            container_names = volume_data.get("container_names", [])
+            if container_names:
+                containers_text = ", ".join(container_names)
+                # Truncate if too long
+                if len(containers_text) > 37:
+                    containers_text = containers_text[:34] + "..."
+            else:
+                containers_text = "None"
+
+            if volume_name not in self.volume_rows:
+                # Add new row
+                row_key = self.volume_table.add_row(
+                    volume_name,
+                    mount_display,
+                    stack_text,
+                    in_use_text,
+                    containers_text,
+                    volume_data["driver"],
                 )
-        return new_volume_containers
+                self.volume_rows[volume_name] = row_key
+                self._volume_data[volume_name] = volume_data  # Store volume data
+            else:
+                # Update existing row
+                row_key = self.volume_rows[volume_name]
+                self.volume_table.update_cell(row_key, "name", volume_name)
+                self.volume_table.update_cell(row_key, "mount", mount_display)
+                self.volume_table.update_cell(row_key, "stack", stack_text)
+                self.volume_table.update_cell(row_key, "in_use", in_use_text)
+                self.volume_table.update_cell(row_key, "containers", containers_text)
+                self.volume_table.update_cell(row_key, "driver", volume_data["driver"])
+                self._volume_data[volume_name] = (
+                    volume_data  # Update stored volume data
+                )
+
+        # Clear pending volumes
+        self._pending_volumes.clear()
+
+    def sort_volume_table(self) -> None:
+        """Sort the volume table with in-use volumes at top, then by name descending."""
+        if not self.volume_table or self.volume_table.row_count == 0:
+            logger.debug("sort_volume_table: No table or no rows to sort")
+            return
+
+        logger.debug(
+            f"sort_volume_table: Starting sort with {self.volume_table.row_count} rows"
+        )
+
+        # Save the currently selected volume if any
+        selected_volume_name = None
+        if self.parent.selected_item and self.parent.selected_item[0] == "volume":
+            selected_volume_name = self.parent.selected_item[1]
+
+        # Get all rows with their data
+        rows_data = []
+        for row_key in self.volume_table.rows:
+            row_cells = []
+            for column in self.volume_table.columns:
+                cell_value = self.volume_table.get_cell(row_key, column.key)
+                row_cells.append(cell_value)
+
+            # Extract the values we need for sorting
+            name = row_cells[0]  # Name column
+            in_use = row_cells[3]  # In Use column
+
+            rows_data.append(
+                {"key": row_key, "cells": row_cells, "name": name, "in_use": in_use}
+            )
+
+        logger.debug(f"sort_volume_table: Collected {len(rows_data)} rows")
+
+        # Log first few rows before sorting
+        for i, row in enumerate(rows_data[:5]):
+            logger.debug(f"  Row {i}: name={row['name']}, in_use={row['in_use']}")
+
+        # Sort: First by in_use (Yes before No), then by name descending
+        # We use a custom sort key that returns a tuple:
+        # - First element: 0 for "Yes" (in use), 1 for "No" (not in use)
+        # - Second element: name (for reverse alphabetical within each group)
+        sorted_rows = sorted(
+            rows_data,
+            key=lambda x: (
+                0 if x["in_use"] == "Yes" else 1,  # In-use volumes get 0, others get 1
+                x["name"].lower(),  # Case-insensitive name comparison
+            ),
+        )
+
+        # Now we need to reverse the name order within each group
+        # Split into groups
+        in_use_volumes = []
+        not_in_use_volumes = []
+
+        for row in sorted_rows:
+            if row["in_use"] == "Yes":
+                in_use_volumes.append(row)
+            else:
+                not_in_use_volumes.append(row)
+
+        logger.debug(
+            f"sort_volume_table: {len(in_use_volumes)} in-use, {len(not_in_use_volumes)} not in-use"
+        )
+
+        # Reverse each group to get descending name order
+        in_use_volumes.reverse()
+        not_in_use_volumes.reverse()
+
+        # Combine with in-use volumes first
+        sorted_rows = in_use_volumes + not_in_use_volumes
+
+        # Log first few rows after sorting
+        logger.debug("sort_volume_table: After sorting:")
+        for i, row in enumerate(sorted_rows[:5]):
+            logger.debug(f"  Row {i}: name={row['name']}, in_use={row['in_use']}")
+
+        # Clear the table
+        self.volume_table.clear()
+        self.volume_rows.clear()
+
+        # Re-add rows in sorted order
+        for row_data in sorted_rows:
+            row_key = self.volume_table.add_row(*row_data["cells"])
+            # Reconstruct the volume_rows mapping
+            volume_name = row_data["name"]
+            self.volume_rows[volume_name] = row_key
+
+        logger.debug(
+            f"sort_volume_table: Sort completed, table now has {self.volume_table.row_count} rows"
+        )
+
+        # Restore selection if there was one
+        if selected_volume_name and selected_volume_name in self.volume_rows:
+            row_key = self.volume_rows[selected_volume_name]
+            self.volume_table.move_cursor(row=row_key)
+
+    def get_volume_table(self) -> Optional[DataTable]:
+        """Get the volume table widget."""
+        return self.volume_table
+
+    def handle_table_selection(self, row_key) -> None:
+        """Handle volume selection from table row selection.
+
+        Args:
+            row_key: The key of the selected row
+        """
+        # Find the volume name for this row key
+        for volume_name, key in self.volume_rows.items():
+            if key == row_key:
+                self.parent.selected_item = ("volume", volume_name)
+                self.parent.selected_container_data = None
+                self.parent.selected_stack_data = None
+                self.parent.selected_network_data = None
+
+                # Get the volume data
+                volume_data = self._volume_data.get(volume_name, {})
+                self.selected_volume_data = volume_data
+                self.parent.selected_volume_data = volume_data
+
+                # Update the footer
+                self.parent._update_footer_with_selection()
+
+                # Post selection change message with the actual volume data
+                self.parent.post_message(
+                    SelectionChanged("volume", volume_name, volume_data)
+                )
+                break
+
+    def show_loading_message(self) -> None:
+        """Show a loading message in the volumes container."""
+        if self.parent.volumes_container and not self.loading_message:
+            self.loading_message = Static(
+                Text("Loading volume information...", style="dim italic"),
+                classes="volume-loading-message",
+            )
+            self.parent.volumes_container.mount(self.loading_message)
+
+    def hide_loading_message(self) -> None:
+        """Hide the loading message if it exists."""
+        if self.loading_message and self.loading_message.parent:
+            self.loading_message.remove()
+            self.loading_message = None

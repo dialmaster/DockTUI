@@ -173,11 +173,13 @@ class NavigationHandler:
                     )
                 self.container_list.footer_formatter.update_footer_with_selection()
 
-            elif (
-                item_type == "volume" and item_id in self.container_list.volume_headers
-            ):
-                header = self.container_list.volume_headers[item_id]
-                header.focus()
+            elif item_type == "volume" and item_id in self.container_list.volume_rows:
+                if self.container_list.volume_manager.volume_table:
+                    self.container_list.volume_manager.volume_table.focus()
+                    row_key = self.container_list.volume_rows[item_id]
+                    self.container_list.volume_manager.volume_table.move_cursor(
+                        row=row_key
+                    )
                 self.container_list.footer_formatter.update_footer_with_selection()
 
             elif item_type == "stack" and item_id in self.container_list.stack_headers:

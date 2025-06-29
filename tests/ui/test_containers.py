@@ -291,8 +291,7 @@ class TestContainerList:
         # Verify existing containers retrieved
         assert "img1" in container_list.existing_image_containers
         assert container_list.existing_image_containers["img1"] is mock_img1
-        assert "vol1" in container_list.existing_volume_containers
-        assert container_list.existing_volume_containers["vol1"] is mock_vol1
+        # Volumes now use a table, no individual containers
         assert "net1" in container_list.existing_network_containers
         assert container_list.existing_network_containers["net1"] is mock_net1
         assert "stack1" in container_list.existing_stack_containers
@@ -301,8 +300,7 @@ class TestContainerList:
         # Verify new containers prepared
         assert "img2" in container_list.new_image_containers
         assert container_list.new_image_containers["img2"] is mock_img2
-        assert "vol2" in container_list.new_volume_containers
-        assert container_list.new_volume_containers["vol2"] is mock_vol2
+        # Volume containers are no longer used as volumes use a table now
         assert "net2" in container_list.new_network_containers
         assert container_list.new_network_containers["net2"] is mock_net2
         assert "stack2" in container_list.new_stack_containers
@@ -314,7 +312,7 @@ class TestContainerList:
 
         # Verify existing containers are empty
         assert container_list.existing_image_containers == {}
-        assert container_list.existing_volume_containers == {}
+        # Volumes now use a table, no individual containers
         assert container_list.existing_network_containers == {}
         assert container_list.existing_stack_containers == {}
 
@@ -495,8 +493,7 @@ class TestContainerList:
         # Call clear
         container_list.clear()
 
-        # Verify expanded states saved
-        container_list.volume_manager.save_expanded_state.assert_called_once()
+        # Verify expanded states saved (volumes don't have expanded state - use table)
         container_list.network_manager.save_expanded_state.assert_called_once()
         container_list.stack_manager.save_expanded_state.assert_called_once()
 
@@ -754,18 +751,6 @@ class TestContainerList:
         # Verify selection
         container_list.select_image.assert_called_once_with("test-image-id")
 
-    def test_on_volume_header_clicked(self, container_list):
-        """Test on_volume_header_clicked event handler."""
-        # Mock event
-        mock_event = Mock()
-        mock_event.volume_header.volume_name = "test-volume"
-        container_list.select_volume = Mock()
-
-        # Call handler
-        container_list.on_volume_header_clicked(mock_event)
-
-        # Verify selection
-        container_list.select_volume.assert_called_once_with("test-volume")
 
     def test_on_network_header_selected(self, container_list):
         """Test on_network_header_selected event handler."""
@@ -952,8 +937,8 @@ class TestContainerList:
         ]
         container_list._mount_section.assert_has_calls(expected_mount_calls)
 
-        # Verify new containers mounted
-        assert container_list._mount_new_containers.call_count == 3
+        # Verify new containers mounted (only stacks and networks, volumes use table)
+        assert container_list._mount_new_containers.call_count == 2
 
     def test_update_existing_sections(self, container_list):
         """Test _update_existing_sections method."""
