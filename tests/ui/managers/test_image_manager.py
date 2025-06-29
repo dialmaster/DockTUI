@@ -362,8 +362,8 @@ class TestImageManager(unittest.TestCase):
         mock_remove.assert_any_call("remove2")
         self.assertEqual(mock_remove.call_count, 2)
 
-        # Check table was sorted
-        mock_sort.assert_called_once()
+        # Check table was NOT sorted (to prevent UI flicker)
+        mock_sort.assert_not_called()
 
         # Check removed images tracking was cleared
         self.assertEqual(self.manager._removed_images, set())
@@ -567,6 +567,29 @@ class TestImageManager(unittest.TestCase):
 
         third_row = mock_table.add_row.call_args_list[2][0]
         self.assertEqual(third_row[6], "Unused")  # Status
+
+    def test_ensure_sorted(self):
+        """Test ensure_sorted method."""
+        # Test when table not initialized
+        self.manager._table_initialized = False
+        with patch.object(self.manager, 'sort_images_table') as mock_sort:
+            self.manager.ensure_sorted()
+            mock_sort.assert_not_called()
+
+        # Test when table initialized but no rows
+        self.manager._table_initialized = True
+        mock_table = Mock()
+        mock_table.row_count = 0
+        self.manager.images_table = mock_table
+        with patch.object(self.manager, 'sort_images_table') as mock_sort:
+            self.manager.ensure_sorted()
+            mock_sort.assert_not_called()
+
+        # Test when table initialized with rows
+        mock_table.row_count = 3
+        with patch.object(self.manager, 'sort_images_table') as mock_sort:
+            self.manager.ensure_sorted()
+            mock_sort.assert_called_once()
 
     def test_sort_images_table_empty(self):
         """Test sorting empty images table."""

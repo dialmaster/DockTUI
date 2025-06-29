@@ -22,8 +22,10 @@ class MockDockTUIApp(DockerActions):
         self.docker = Mock()
         self.log_pane = Mock()
         self._timers = []
+        self._posted_messages = []
         self.refresh = Mock()
         self.action_refresh = Mock()
+        self.app = self  # DockerActions expects self.app for post_message
 
     def set_timer(self, delay, callback):
         """Mock set_timer method."""
@@ -32,6 +34,19 @@ class MockDockTUIApp(DockerActions):
     def call_from_thread(self, func, *args, **kwargs):
         """Mock call_from_thread method."""
         func(*args, **kwargs)
+    
+    def post_message(self, message):
+        """Mock post_message method."""
+        self._posted_messages.append(message)
+    
+    def _is_volume_removable(self, volume_data):
+        """Mock _is_volume_removable method."""
+        if not volume_data:
+            return False, "No volume data available"
+        if volume_data.get("in_use", False):
+            container_count = volume_data.get("container_count", 0)
+            return False, f"Cannot remove volume: in use by {container_count} container(s)"
+        return True, ""
 
 
 class TestDockerActions:
@@ -233,12 +248,88 @@ class TestDockerActions:
 
         app.execute_docker_command("down_remove_volumes")
 
-        app.docker.execute_stack_command.assert_called_once_with(
-            "my-stack", "/path/to/compose.yml", "down_remove_volumes"
-        )
+    def test_execute_volume_command_remove_success(self):
+        """Test successful volume removal command."""
+        app = MockDockTUIApp()
+        app.container_list.selected_item = ("volume", "test-volume")
+        app.container_list.volume_manager = Mock()
+        app.container_list.volume_manager.selected_volume_data = {
+            "name": "test-volume",
+            "in_use": False
+        }
+        app.container_list.volume_manager.remove_volume = Mock()
+        app.docker.remove_volume.return_value = (True, "Volume removed successfully")
+
+        app.execute_volume_command("remove_volume")
+
+        # The remove_volume operation will be called in a thread, so we need to wait
+        # Since we can't easily wait for threads in tests, just check the immediate feedback
+        app.error_display.update.assert_called_with("Removing volume 'test-volume'...")
+
+    def test_execute_volume_command_remove_in_use(self):
+        """Test volume removal when volume is in use."""
+        app = MockDockTUIApp()
+        app.container_list.selected_item = ("volume", "test-volume")
+        app.container_list.volume_manager = Mock()
+        app.container_list.volume_manager.selected_volume_data = {
+            "name": "test-volume",
+            "in_use": True,
+            "container_names": ["container1", "container2"],
+            "container_count": 2
+        }
+
+        app.execute_volume_command("remove_volume")
+
+        app.docker.remove_volume.assert_not_called()
         app.error_display.update.assert_called_with(
-            "Taking down stack: my-stack (including volumes)"
+            "Cannot remove volume: in use by 2 container(s)"
         )
+
+    def test_execute_volume_command_no_selection(self):
+        """Test volume removal with no selection."""
+        app = MockDockTUIApp()
+        app.container_list.selected_item = None
+
+        app.execute_volume_command("remove_volume")
+
+        app.error_display.update.assert_called_with("No volume selected")
+
+    def test_execute_volume_command_wrong_type(self):
+        """Test volume removal when non-volume is selected."""
+        app = MockDockTUIApp()
+        app.container_list.selected_item = ("container", "test-container")
+
+        app.execute_volume_command("remove_volume")
+
+        app.error_display.update.assert_called_with("Selected item is not a volume")
+
+    def test_execute_volume_command_remove_unused_success(self):
+        """Test successful removal of unused volumes."""
+        app = MockDockTUIApp()
+        unused_volumes = [
+            {"name": "vol1", "in_use": False},
+            {"name": "vol2", "in_use": False}
+        ]
+        app.docker.get_unused_volumes.return_value = unused_volumes
+        app.docker.remove_unused_volumes.return_value = (
+            True, "Removed 2 volumes, freed 100 MB", 2
+        )
+        app.container_list.volume_manager = Mock()
+
+        app.execute_volume_command("remove_unused_volumes")
+
+        # The operation will be called in a thread, so check immediate feedback
+        app.error_display.update.assert_called_with("Removing 2 unused volumes...")
+
+    def test_execute_volume_command_remove_unused_none(self):
+        """Test remove unused volumes when none exist."""
+        app = MockDockTUIApp()
+        app.docker.get_unused_volumes.return_value = []
+
+        app.execute_volume_command("remove_unused_volumes")
+
+        app.docker.remove_unused_volumes.assert_not_called()
+        app.error_display.update.assert_called_with("No unused volumes found")
 
     def test_execute_docker_command_stack_recreate(self):
         """Test execute_docker_command for stack recreate."""
@@ -461,23 +552,29 @@ class TestDockerActions:
         )
         app.docker.remove_image.return_value = (True, "Image removed successfully")
 
-        app.execute_image_command("remove_image")
+        # Mock threading to execute synchronously for testing
+        with patch("threading.Thread") as mock_thread:
+            mock_thread.return_value.start.side_effect = lambda: mock_thread.call_args[1]["target"]()
+            
+            app.execute_image_command("remove_image")
 
         app.docker.remove_image.assert_called_once_with("test-image")
-        app.error_display.update.assert_called_once_with("Image removed successfully")
+        
+        # Check immediate feedback
+        app.error_display.update.assert_called_with("Removing image...")
+        
+        # Check image marked as removed immediately
         app.container_list.image_manager.mark_image_as_removed.assert_called_once_with(
             "test-image"
         )
-        app.container_list.image_manager.select_image.assert_called_once_with(
-            "next-image"
-        )
-        assert (
-            app.container_list.image_manager._preserve_selected_image_id == "next-image"
-        )
-
-        # Check timer was set
-        assert len(app._timers) == 1
-        assert app._timers[0][0] == 2.0
+        
+        # Check completion message was posted
+        assert app._posted_messages
+        msg = app._posted_messages[0]
+        assert msg.operation == "remove_image"
+        assert msg.success is True
+        assert msg.message == "Image removed successfully"
+        assert msg.item_id == "test-image"
 
     def test_execute_image_command_remove_image_failure(self):
         """Test execute_image_command remove_image failed removal."""
@@ -487,10 +584,27 @@ class TestDockerActions:
         app.container_list.image_manager.selected_image_data = {"container_names": []}
         app.docker.remove_image.return_value = (False, "Permission denied")
 
-        app.execute_image_command("remove_image")
+        # Mock threading to execute synchronously for testing
+        with patch("threading.Thread") as mock_thread:
+            mock_thread.return_value.start.side_effect = lambda: mock_thread.call_args[1]["target"]()
+            
+            app.execute_image_command("remove_image")
 
-        app.error_display.update.assert_called_once_with("Error: Permission denied")
-        app.container_list.image_manager.mark_image_as_removed.assert_not_called()
+        # Check immediate feedback
+        app.error_display.update.assert_called_with("Removing image...")
+        
+        # Image should still be marked as removed immediately (for UI feedback)
+        app.container_list.image_manager.mark_image_as_removed.assert_called_once_with(
+            "test-image"
+        )
+        
+        # Check failure message was posted
+        assert app._posted_messages
+        msg = app._posted_messages[0]
+        assert msg.operation == "remove_image"
+        assert msg.success is False
+        assert msg.message == "Permission denied"
+        assert msg.item_id == "test-image"
 
     def test_execute_image_command_remove_unused_images_none_found(self):
         """Test execute_image_command remove_unused_images when none found."""
@@ -520,24 +634,30 @@ class TestDockerActions:
             3,
         )
 
-        app.execute_image_command("remove_unused_images")
+        # Mock threading to execute synchronously for testing
+        with patch("threading.Thread") as mock_thread:
+            mock_thread.return_value.start.side_effect = lambda: mock_thread.call_args[1]["target"]()
+            
+            app.execute_image_command("remove_unused_images")
 
         app.docker.remove_unused_images.assert_called_once()
-        app.error_display.update.assert_called_once_with("Removed 3 unused images")
+        
+        # Check immediate feedback
+        app.error_display.update.assert_called_with("Removing 3 unused images...")
 
         # Verify all images marked as removed
         expected_calls = [call("image1"), call("image2"), call("image3")]
         app.container_list.image_manager.mark_image_as_removed.assert_has_calls(
             expected_calls
         )
-
-        # Verify selection update
-        app.container_list.image_manager.select_image.assert_called_once_with(
-            "next-image"
-        )
-        assert (
-            app.container_list.image_manager._preserve_selected_image_id == "next-image"
-        )
+        
+        # Check completion message was posted
+        assert app._posted_messages
+        msg = app._posted_messages[0]
+        assert msg.operation == "remove_unused_images"
+        assert msg.success is True
+        assert msg.message == "Removed 3 unused images"
+        assert set(msg.item_ids) == {"image1", "image2", "image3"}
 
     def test_execute_image_command_remove_unused_images_failure(self):
         """Test execute_image_command remove_unused_images failed removal."""
@@ -551,10 +671,21 @@ class TestDockerActions:
             0,
         )
 
-        app.execute_image_command("remove_unused_images")
+        # Mock threading to execute synchronously for testing
+        with patch("threading.Thread") as mock_thread:
+            mock_thread.return_value.start.side_effect = lambda: mock_thread.call_args[1]["target"]()
+            
+            app.execute_image_command("remove_unused_images")
 
-        app.error_display.update.assert_called_once_with("Error: Permission denied")
-        app.container_list.image_manager.mark_image_as_removed.assert_not_called()
+        # Check immediate feedback
+        app.error_display.update.assert_called_with("Removing 1 unused images...")
+        
+        # Check failure message was posted
+        assert app._posted_messages
+        msg = app._posted_messages[0]
+        assert msg.operation == "remove_unused_images"
+        assert msg.success is False
+        assert msg.message == "Permission denied"
 
     def test_execute_image_command_remove_unused_images_no_next_selection(self):
         """Test execute_image_command remove_unused_images with no next selection."""

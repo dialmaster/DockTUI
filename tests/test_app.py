@@ -19,6 +19,7 @@ from DockTUI.ui.dialogs.confirm import (
     RemoveContainerModal,
     RemoveImageModal,
     RemoveUnusedImagesModal,
+    RemoveUnusedVolumesModal,
 )
 from DockTUI.ui.viewers.log_pane import LogPane
 from DockTUI.ui.widgets.status import ErrorDisplay, StatusBar
@@ -107,6 +108,7 @@ class TestDockTUIApp:
                 "Down Selected Stack",
                 "Remove Selected Image",
                 "Remove All Unused Images",
+                "Prune All Unused Volumes",
             ]
             assert custom_titles == expected_titles
 
@@ -493,6 +495,37 @@ class TestDockTUIApp:
 
         app.error_display.update.assert_called_with("No unused images found")
 
+    def test_action_prune_unused_volumes(self):
+        """Test prune unused volumes action."""
+        app = DockTUIApp.__new__(DockTUIApp)
+        app.docker = Mock()
+        app.docker.get_unused_volumes.return_value = [
+            {"name": "volume1", "in_use": False},
+            {"name": "volume2", "in_use": False},
+        ]
+        app.push_screen = Mock()
+        app.error_display = Mock()
+
+        app.action_prune_unused_volumes()
+
+        # Should get unused volumes
+        app.docker.get_unused_volumes.assert_called_once()
+        # Should push volume removal modal
+        modal = app.push_screen.call_args[0][0]
+        assert isinstance(modal, RemoveUnusedVolumesModal)
+        assert modal.unused_count == 2
+
+    def test_action_prune_unused_volumes_none_found(self):
+        """Test prune unused volumes when none are found."""
+        app = DockTUIApp.__new__(DockTUIApp)
+        app.docker = Mock()
+        app.docker.get_unused_volumes.return_value = []
+        app.error_display = Mock()
+
+        app.action_prune_unused_volumes()
+
+        app.error_display.update.assert_called_with("No unused volumes found")
+
     def test_check_action_system_actions(self):
         """Test check_action for system actions."""
         app = DockTUIApp.__new__(DockTUIApp)
@@ -566,6 +599,9 @@ class TestDockTUIApp:
         app.container_list = Mock()
         app.status_bar = Mock()
         app.refresh_bindings = Mock()
+        app.footer = Mock()
+        app._current_selection_type = "none"
+        app._current_selection_status = "none"
 
         event = SelectionChanged(
             item_type="container",
@@ -591,6 +627,9 @@ class TestDockTUIApp:
         app.container_list = Mock()
         app.status_bar = Mock()
         app.refresh_bindings = Mock()
+        app.footer = Mock()
+        app._current_selection_type = "none"
+        app._current_selection_status = "none"
 
         event = SelectionChanged(
             item_type="none",
@@ -629,6 +668,7 @@ class TestDockTUIApp:
 
         # refresh_bindings should not be called
         app.refresh_bindings.assert_not_called()
+
 
 
 class TestMain:
@@ -682,6 +722,7 @@ class TestIntegration:
         assert "d" in binding_keys
         assert "r" in binding_keys
         assert "R" in binding_keys
+        assert "p" in binding_keys
 
     def test_enable_command_palette(self):
         """Test that command palette is enabled."""

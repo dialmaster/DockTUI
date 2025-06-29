@@ -1,7 +1,7 @@
 """Base container list widget with core functionality."""
 
 import logging
-from typing import Dict, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from textual.binding import Binding
 from textual.containers import Container, VerticalScroll
@@ -20,6 +20,25 @@ class SelectionChanged(Message):
         self.item_type = item_type
         self.item_id = item_id
         self.item_data = item_data
+        super().__init__()
+
+
+class DockerOperationCompleted(Message):
+    """Message sent when a Docker operation completes."""
+
+    def __init__(
+        self,
+        operation: str,
+        success: bool,
+        message: str,
+        item_id: Optional[str] = None,
+        item_ids: Optional[List[str]] = None,
+    ):
+        self.operation = operation
+        self.success = success
+        self.message = message
+        self.item_id = item_id  # Single item for backward compatibility
+        self.item_ids = item_ids or ([item_id] if item_id else [])  # List of items
         super().__init__()
 
 

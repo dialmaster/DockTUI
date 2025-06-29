@@ -4,6 +4,8 @@ import logging
 import threading
 from typing import TYPE_CHECKING, Optional, Tuple
 
+from ..base.container_list_base import DockerOperationCompleted
+
 if TYPE_CHECKING:
     from DockTUI.app import DockTUIApp
 
@@ -18,6 +20,9 @@ class DockerActions:
         # Track recreate operations to update log pane after refresh
         self._recreating_container_name = None
         self._recreating_item_type = None
+        # Prevent concurrent volume operations
+        self._volume_operation_in_progress = False
+        self._volume_operation_lock = threading.Lock()
 
     def is_action_applicable(self: "DockTUIApp", action: str) -> bool:
         """Check if an action is applicable to the current selection.
@@ -273,20 +278,35 @@ class DockerActions:
                 )
             )
 
-            success, message = self.docker.remove_image(item_id)
-            if success:
-                self.error_display.update(message)
-                self.container_list.image_manager.mark_image_as_removed(item_id)
+            def remove_image_thread():
+                """Execute image removal in background thread."""
+                success, message = self.docker.remove_image(item_id)
 
-                if next_selection:
-                    self.container_list.image_manager.select_image(next_selection)
-                    self.container_list.image_manager._preserve_selected_image_id = (
-                        next_selection
+                # Post completion message from the thread
+                self.app.post_message(
+                    DockerOperationCompleted(
+                        operation="remove_image",
+                        success=success,
+                        message=message,
+                        item_id=item_id,
+                    )
+                )
+
+                # Handle next selection if successful
+                if success and next_selection:
+                    self.app.call_from_thread(
+                        lambda: self.container_list.image_manager.select_image(
+                            next_selection
+                        )
                     )
 
-                self.set_timer(2.0, self.action_refresh)
-            else:
-                self.error_display.update(f"Error: {message}")
+            # Start the operation in a background thread
+            thread = threading.Thread(target=remove_image_thread, daemon=True)
+            thread.start()
+
+            # Show immediate feedback - mark as being removed
+            self.container_list.image_manager.mark_image_as_removed(item_id)
+            self.error_display.update(f"Removing image...")
 
         elif command == "remove_unused_images":
             unused_images = self.docker.get_unused_images()
@@ -304,19 +324,146 @@ class DockerActions:
                 )
             )
 
-            success, message, removed_count = self.docker.remove_unused_images()
-            if success:
-                self.error_display.update(message)
+            def remove_unused_images_thread():
+                """Execute unused images removal in background thread."""
+                # Store image IDs before removal
+                image_ids = list(unused_image_ids)
+                success, message, removed_count = self.docker.remove_unused_images()
 
-                for img in unused_images:
-                    self.container_list.image_manager.mark_image_as_removed(img["id"])
+                # Post completion message from the thread
+                self.app.post_message(
+                    DockerOperationCompleted(
+                        operation="remove_unused_images",
+                        success=success,
+                        message=message,
+                        item_ids=image_ids,  # Pass image IDs as list
+                    )
+                )
 
-                if next_selection:
-                    self.container_list.image_manager.select_image(next_selection)
-                    self.container_list.image_manager._preserve_selected_image_id = (
-                        next_selection
+                # Handle next selection if successful
+                if success and next_selection:
+                    self.app.call_from_thread(
+                        lambda: self.container_list.image_manager.select_image(
+                            next_selection
+                        )
                     )
 
-                self.set_timer(2.0, self.action_refresh)
-            else:
-                self.error_display.update(f"Error: {message}")
+            # Start the operation in a background thread
+            thread = threading.Thread(target=remove_unused_images_thread, daemon=True)
+            thread.start()
+
+            # Show immediate feedback - mark all unused images as being removed
+            for img in unused_images:
+                self.container_list.image_manager.mark_image_as_removed(img["id"])
+
+            self.error_display.update(f"Removing {unused_count} unused images...")
+
+    def execute_volume_command(self: "DockTUIApp", command: str) -> None:
+        """Execute a Docker command on volumes.
+
+        Args:
+            command: The command to execute (remove_volume, remove_unused_volumes)
+        """
+        # Check if a volume operation is already in progress
+        with self._volume_operation_lock:
+            if self._volume_operation_in_progress:
+                self.error_display.update("A volume operation is already in progress")
+                return
+            self._volume_operation_in_progress = True
+
+        try:
+            if command == "remove_volume":
+                if not self.container_list or not self.container_list.selected_item:
+                    self.error_display.update("No volume selected")
+                    with self._volume_operation_lock:
+                        self._volume_operation_in_progress = False
+                    return
+
+                item_type, item_id = self.container_list.selected_item
+                if item_type != "volume":
+                    self.error_display.update("Selected item is not a volume")
+                    with self._volume_operation_lock:
+                        self._volume_operation_in_progress = False
+                    return
+
+                volume_data = self.container_list.volume_manager.selected_volume_data
+                can_remove, error_msg = self._is_volume_removable(volume_data)
+
+                if not can_remove:
+                    self.error_display.update(error_msg)
+                    with self._volume_operation_lock:
+                        self._volume_operation_in_progress = False
+                    return
+
+                def remove_volume_thread():
+                    """Execute volume removal in background thread."""
+                    try:
+                        success, message = self.docker.remove_volume(item_id)
+
+                        # Post completion message from the thread
+                        self.app.post_message(
+                            DockerOperationCompleted(
+                                operation="remove_volume",
+                                success=success,
+                                message=message,
+                                item_id=item_id,
+                            )
+                        )
+                    finally:
+                        # Always clear the operation flag
+                        with self._volume_operation_lock:
+                            self._volume_operation_in_progress = False
+
+                # Start the operation in a background thread
+                thread = threading.Thread(target=remove_volume_thread, daemon=True)
+                thread.start()
+
+                # Show immediate feedback
+                self.error_display.update(f"Removing volume '{item_id}'...")
+
+            elif command == "remove_unused_volumes":
+                unused_volumes = self.docker.get_unused_volumes()
+                unused_count = len(unused_volumes)
+
+                if unused_count == 0:
+                    self.error_display.update("No unused volumes found")
+                    with self._volume_operation_lock:
+                        self._volume_operation_in_progress = False
+                    return
+
+                def remove_unused_volumes_thread():
+                    """Execute unused volume removal in background thread."""
+                    try:
+                        # Store volume names before removal
+                        volume_names = [v["name"] for v in unused_volumes]
+                        success, message, removed_count = (
+                            self.docker.remove_unused_volumes()
+                        )
+
+                        # Post completion message from the thread
+                        self.app.post_message(
+                            DockerOperationCompleted(
+                                operation="remove_unused_volumes",
+                                success=success,
+                                message=message,
+                                item_ids=volume_names,  # Pass volume names as list
+                            )
+                        )
+                    finally:
+                        # Always clear the operation flag
+                        with self._volume_operation_lock:
+                            self._volume_operation_in_progress = False
+
+                # Start the operation in a background thread
+                thread = threading.Thread(
+                    target=remove_unused_volumes_thread, daemon=True
+                )
+                thread.start()
+
+                # Show immediate feedback
+                self.error_display.update(f"Removing {unused_count} unused volumes...")
+        except Exception as e:
+            logger.error(f"Error in execute_volume_command: {e}")
+            self.error_display.update(f"Error: {str(e)}")
+            with self._volume_operation_lock:
+                self._volume_operation_in_progress = False

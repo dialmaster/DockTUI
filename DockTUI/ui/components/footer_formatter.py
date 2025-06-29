@@ -82,6 +82,26 @@ class FooterFormatter:
             )
         else:
             selection_text.append("None", Style(color="dim", bold=True))
+        selection_text.append(" | ", Style(color="white"))
+        selection_text.append("In Use: ", Style(color="white"))
+        if volume_data.get("in_use", False):
+            container_names = volume_data.get("container_names", [])
+            if container_names:
+                names_text = ", ".join(container_names)
+                # Truncate if too long
+                if len(names_text) > 50:
+                    names_text = names_text[:47] + "..."
+                selection_text.append(
+                    f"Yes ({names_text})",
+                    Style(color="green", bold=True),
+                )
+            else:
+                selection_text.append(
+                    f"Yes ({volume_data.get('container_count', 0)} containers)",
+                    Style(color="green", bold=True),
+                )
+        else:
+            selection_text.append("No", Style(color="red", bold=True))
         status_bar.update(selection_text)
         # SelectionChanged is posted by the volume manager
 

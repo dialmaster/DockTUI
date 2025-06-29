@@ -11,7 +11,7 @@ from .managers.image_manager import ImageManager
 from .managers.network_manager import NetworkManager
 from .managers.stack_manager import StackManager
 from .managers.volume_manager import VolumeManager
-from .widgets.headers import NetworkHeader, StackHeader, VolumeHeader
+from .widgets.headers import NetworkHeader, StackHeader
 
 logger = logging.getLogger("DockTUI.containers")
 
@@ -46,7 +46,14 @@ class ContainerList(ContainerListBase):
     def begin_update(self) -> None:
         """Begin a batch update to prevent UI flickering during data updates."""
         self._is_updating = True
-        self._pending_clear = len(self.children) == 0
+        # Only do a full clear if we have no children OR if the basic structure is missing
+        self._pending_clear = (
+            len(self.children) == 0
+            or self.images_section_header is None
+            or self.images_container is None
+            or self.images_section_header not in self.children
+            or self.images_container not in self.children
+        )
 
         # Clear all tables to ensure fresh data
         self.network_manager.clear_tables()
@@ -83,6 +90,12 @@ class ContainerList(ContainerListBase):
             else:
                 self._update_existing_sections()
 
+            # Flush pending volumes to table in sorted order
+            self.volume_manager.flush_pending_volumes()
+
+            # Ensure images table is sorted after all updates
+            self.image_manager.ensure_sorted()
+
             # Restore selection and focus
             self._restore_selection()
 
@@ -110,9 +123,7 @@ class ContainerList(ContainerListBase):
             self.existing_image_containers = (
                 self.image_manager.get_existing_containers()
             )
-            self.existing_volume_containers = (
-                self.volume_manager.get_existing_containers()
-            )
+            # Volumes now use a table, no individual containers
             self.existing_network_containers = (
                 self.network_manager.get_existing_containers()
             )
@@ -121,13 +132,11 @@ class ContainerList(ContainerListBase):
             )
         else:
             self.existing_image_containers = {}
-            self.existing_volume_containers = {}
             self.existing_network_containers = {}
             self.existing_stack_containers = {}
 
         # Prepare new containers using managers
         self.new_image_containers = self.image_manager.prepare_new_containers()
-        self.new_volume_containers = self.volume_manager.prepare_new_containers()
         self.new_network_containers = self.network_manager.prepare_new_containers()
         self.new_stack_containers = self.stack_manager.prepare_new_containers()
 
@@ -169,22 +178,12 @@ class ContainerList(ContainerListBase):
             self.volumes_container,
             self.volumes_section_collapsed,
         )
-        self._mount_new_containers(
-            self.new_volume_containers, self.volumes_container, with_table=False
-        )
 
     def _update_existing_sections(self) -> None:
         """Update existing sections and add new items."""
         # Images are handled by the table, no individual containers to update
 
-        # Update existing volumes
-        for volume_name, container in self.existing_volume_containers.items():
-            if volume_name in self.volume_headers:
-                for widget in container.children:
-                    if isinstance(widget, VolumeHeader):
-                        widget._update_content()
-            else:
-                container.remove()
+        # Volumes are now handled by the table, will be mounted after ensuring container exists
 
         # Update existing networks
         for network_name, container in self.existing_network_containers.items():
@@ -255,14 +254,11 @@ class ContainerList(ContainerListBase):
         self._mount_new_containers(
             self.new_network_containers, self.networks_container, with_table=True
         )
-        self._mount_new_containers(
-            self.new_volume_containers, self.volumes_container, with_table=False
-        )
 
     def clear(self) -> None:
         """Clear all stacks and containers while preserving expansion states."""
         # Save expanded states before clearing
-        self.volume_manager.save_expanded_state()
+        # Volume manager doesn't have expanded state (uses table)
         self.network_manager.save_expanded_state()
         self.stack_manager.save_expanded_state()
 
@@ -444,6 +440,7 @@ class ContainerList(ContainerListBase):
         """
         self.volume_manager.select_volume(volume_name)
         # Manager handles selection data updates
+        self.selected_volume_data = self.volume_manager.selected_volume_data
 
     def select_network(self, network_name: str) -> None:
         """Select a network and update the footer.
@@ -484,8 +481,7 @@ class ContainerList(ContainerListBase):
         self._images_in_new_data = self.image_manager._images_in_new_data
 
         # Volume references
-        self.volume_headers = self.volume_manager.volume_headers
-        self.expanded_volumes = self.volume_manager.expanded_volumes
+        self.volume_rows = self.volume_manager.volume_rows
         self._volumes_in_new_data = self.volume_manager._volumes_in_new_data
 
         # Network references
@@ -569,6 +565,9 @@ class ContainerList(ContainerListBase):
                 self.volumes_container.styles.display = (
                     "none" if header.collapsed else "block"
                 )
+                # Show loading message when expanding if table not initialized
+                if not header.collapsed and not self.volume_manager._table_initialized:
+                    self.volume_manager.show_loading_message()
         elif header == self.images_section_header:
             self.images_section_collapsed = header.collapsed
             # Toggle visibility of the images container
@@ -595,14 +594,6 @@ class ContainerList(ContainerListBase):
         """Handle ImageHeader click events."""
         self.select_image(event.image_header.image_id)
 
-    def on_volume_header_selected(self, event) -> None:
-        """Handle VolumeHeader selection events."""
-        self.select_volume(event.volume_header.volume_name)
-
-    def on_volume_header_clicked(self, event) -> None:
-        """Handle VolumeHeader click events."""
-        self.select_volume(event.volume_header.volume_name)
-
     def on_network_header_selected(self, event) -> None:
         """Handle NetworkHeader selection events."""
         self.select_network(event.network_header.network_name)
@@ -627,6 +618,14 @@ class ContainerList(ContainerListBase):
         # Check if it's the images table
         if self.image_manager.images_table and table == self.image_manager.images_table:
             self.image_manager.handle_selection(row_key)
+            return
+
+        # Check if it's the volumes table
+        if (
+            self.volume_manager.volume_table
+            and table == self.volume_manager.volume_table
+        ):
+            self.volume_manager.handle_table_selection(row_key)
             return
 
         # Find which stack this table belongs to
