@@ -24,6 +24,8 @@ DockTUI is built using Python with the following core components:
 - Real-time log streaming with configurable time ranges and tail limits
 - Event monitoring for container state changes
 - Thread-safe concurrent operations for improved performance
+- Volume management with usage tracking and container associations
+- Non-blocking image and volume removal operations
 
 ### State Management
 - Container and stack state tracking
@@ -44,6 +46,7 @@ Docker Engine <-> docker-py SDK <-> DockerManager (with threading) <-> UI Compon
   - Provides command palette integration
 - **ContainerList** (`DockTUI/ui/containers.py`): Navigable list of containers with real-time stats
   - Uses specialized managers for different Docker resources (images, networks, stacks, volumes)
+  - Volumes displayed in table format with usage tracking and container associations
 - **DockerManager** (`DockTUI/docker_mgmt/manager.py`): Handles direct Docker SDK integration with concurrent operations:
   - Thread-based non-blocking container operations
   - Parallel stats collection for all containers
@@ -53,8 +56,13 @@ Docker Engine <-> docker-py SDK <-> DockerManager (with threading) <-> UI Compon
   - Session-based log streaming to prevent duplicates
   - Configurable time ranges and tail limits
 - **Action Mixins**: Modular action handling
-  - **DockerActions**: Container/stack operations with context awareness
+  - **DockerActions**: Container/stack/volume/image operations with context awareness
   - **RefreshActions**: UI refresh and data update management
+- **VolumeManager** (`DockTUI/ui/managers/volume_manager.py`): Volume display and operations:
+  - Table-based UI showing volume details and usage
+  - Real-time tracking of containers using each volume
+  - Volume removal with safety checks
+  - Unused volume pruning with space reclamation display
 
 ### Project Structure
 
@@ -75,6 +83,7 @@ DockTUI/
 ├── utils/                     # Utility modules
 │   ├── clipboard.py          # Cross-platform clipboard support
 │   ├── time_utils.py         # Time formatting utilities
+│   ├── formatting.py         # Byte size formatting utilities
 │   └── logging.py            # Debug logging setup
 └── config.py                  # Configuration management
 ```
@@ -224,7 +233,11 @@ Separates concerns using mixins for actions and behaviors:
 - Enables better testability and code organization
 
 #### Context-Aware Actions
-Actions dynamically enable/disable based on selection (e.g., can't recreate without compose file)
+Actions dynamically enable/disable based on selection:
+- Can't recreate without compose file
+- Can't remove volumes that are in use
+- Remove container action only available for stopped/exited containers
+- Dynamic footer bindings update based on current selection
 
 ## CI/CD
 
