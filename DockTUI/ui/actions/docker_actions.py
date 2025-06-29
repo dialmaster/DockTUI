@@ -278,20 +278,35 @@ class DockerActions:
                 )
             )
 
-            success, message = self.docker.remove_image(item_id)
-            if success:
-                self.error_display.update(message)
-                self.container_list.image_manager.mark_image_as_removed(item_id)
+            def remove_image_thread():
+                """Execute image removal in background thread."""
+                success, message = self.docker.remove_image(item_id)
 
-                if next_selection:
-                    self.container_list.image_manager.select_image(next_selection)
-                    self.container_list.image_manager._preserve_selected_image_id = (
-                        next_selection
+                # Post completion message from the thread
+                self.app.post_message(
+                    DockerOperationCompleted(
+                        operation="remove_image",
+                        success=success,
+                        message=message,
+                        item_id=item_id,
+                    )
+                )
+
+                # Handle next selection if successful
+                if success and next_selection:
+                    self.app.call_from_thread(
+                        lambda: self.container_list.image_manager.select_image(
+                            next_selection
+                        )
                     )
 
-                self.set_timer(2.0, self.action_refresh)
-            else:
-                self.error_display.update(f"Error: {message}")
+            # Start the operation in a background thread
+            thread = threading.Thread(target=remove_image_thread, daemon=True)
+            thread.start()
+
+            # Show immediate feedback - mark as being removed
+            self.container_list.image_manager.mark_image_as_removed(item_id)
+            self.error_display.update(f"Removing image...")
 
         elif command == "remove_unused_images":
             unused_images = self.docker.get_unused_images()
@@ -309,22 +324,39 @@ class DockerActions:
                 )
             )
 
-            success, message, removed_count = self.docker.remove_unused_images()
-            if success:
-                self.error_display.update(message)
+            def remove_unused_images_thread():
+                """Execute unused images removal in background thread."""
+                # Store image IDs before removal
+                image_ids = list(unused_image_ids)
+                success, message, removed_count = self.docker.remove_unused_images()
 
-                for img in unused_images:
-                    self.container_list.image_manager.mark_image_as_removed(img["id"])
+                # Post completion message from the thread
+                self.app.post_message(
+                    DockerOperationCompleted(
+                        operation="remove_unused_images",
+                        success=success,
+                        message=message,
+                        item_ids=image_ids,  # Pass image IDs as list
+                    )
+                )
 
-                if next_selection:
-                    self.container_list.image_manager.select_image(next_selection)
-                    self.container_list.image_manager._preserve_selected_image_id = (
-                        next_selection
+                # Handle next selection if successful
+                if success and next_selection:
+                    self.app.call_from_thread(
+                        lambda: self.container_list.image_manager.select_image(
+                            next_selection
+                        )
                     )
 
-                self.set_timer(2.0, self.action_refresh)
-            else:
-                self.error_display.update(f"Error: {message}")
+            # Start the operation in a background thread
+            thread = threading.Thread(target=remove_unused_images_thread, daemon=True)
+            thread.start()
+
+            # Show immediate feedback - mark all unused images as being removed
+            for img in unused_images:
+                self.container_list.image_manager.mark_image_as_removed(img["id"])
+
+            self.error_display.update(f"Removing {unused_count} unused images...")
 
     def execute_volume_command(self: "DockTUIApp", command: str) -> None:
         """Execute a Docker command on volumes.

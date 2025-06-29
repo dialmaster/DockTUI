@@ -46,7 +46,14 @@ class ContainerList(ContainerListBase):
     def begin_update(self) -> None:
         """Begin a batch update to prevent UI flickering during data updates."""
         self._is_updating = True
-        self._pending_clear = len(self.children) == 0
+        # Only do a full clear if we have no children OR if the basic structure is missing
+        self._pending_clear = (
+            len(self.children) == 0
+            or self.images_section_header is None
+            or self.images_container is None
+            or self.images_section_header not in self.children
+            or self.images_container not in self.children
+        )
 
         # Clear all tables to ensure fresh data
         self.network_manager.clear_tables()
@@ -85,6 +92,9 @@ class ContainerList(ContainerListBase):
 
             # Flush pending volumes to table in sorted order
             self.volume_manager.flush_pending_volumes()
+
+            # Ensure images table is sorted after all updates
+            self.image_manager.ensure_sorted()
 
             # Restore selection and focus
             self._restore_selection()

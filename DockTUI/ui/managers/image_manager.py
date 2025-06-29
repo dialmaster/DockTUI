@@ -298,20 +298,32 @@ class ImageManager:
         images_to_remove = []
         for image_id in self.image_rows:
             if image_id not in self._images_in_new_data:
-                images_to_remove.append(image_id)
+                # Only remove if it's not marked as being removed
+                # (marked images will be removed later when confirmed gone)
+                if image_id not in self._removed_images:
+                    images_to_remove.append(image_id)
 
         logger.debug(f"Cleaning up {len(images_to_remove)} removed images")
         for image_id in images_to_remove:
             self.remove_image(image_id)
 
-        # Clear the removed images tracking after cleanup
-        self._removed_images.clear()
+        # For images marked as removed, check if they're truly gone
+        confirmed_removed = []
+        for image_id in self._removed_images:
+            if image_id not in self._images_in_new_data:
+                # Image is confirmed gone from Docker, safe to remove from table
+                confirmed_removed.append(image_id)
 
-        # Sort the table after cleanup
+        # Remove confirmed images from table
+        for image_id in confirmed_removed:
+            self.remove_image(image_id)
+            self._removed_images.discard(image_id)
+
+        # Skip sorting after cleanup to prevent UI flicker
+        # The table order is already correct after removing individual rows
         logger.debug(
-            f"Sorting table with {self.images_table.row_count if self.images_table else 0} rows"
+            f"Cleanup complete. Table has {self.images_table.row_count if self.images_table else 0} rows"
         )
-        self.sort_images_table()
 
     def select_image(self, image_id: str) -> None:
         """Select an image and update the footer.
@@ -519,3 +531,13 @@ class ImageManager:
         for idx, (image_id, cells) in enumerate(rows_data):
             self.images_table.add_row(*cells, key=image_id)
             self.image_rows[image_id] = idx
+
+    def ensure_sorted(self) -> None:
+        """Ensure the images table is sorted after all updates."""
+        if (
+            self._table_initialized
+            and self.images_table
+            and self.images_table.row_count > 0
+        ):
+            logger.debug("Sorting images table after batch update")
+            self.sort_images_table()

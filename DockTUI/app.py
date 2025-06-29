@@ -640,7 +640,34 @@ class DockTUIApp(App, DockerActions, RefreshActions):
                 if self.log_pane:
                     self.log_pane.clear_selection()
 
-        # Trigger refresh to ensure UI is in sync
+        elif event.operation == "remove_image" and event.success:
+            # Don't remove the image immediately - let the next refresh handle it
+            # This prevents issues if Docker still reports the image exists
+            # Just clear selection if it was the removed image
+            if self.container_list and event.item_id:
+                if (
+                    self.container_list.selected_item
+                    and self.container_list.selected_item[0] == "image"
+                    and self.container_list.selected_item[1] == event.item_id
+                ):
+                    self.container_list.selected_item = None
+                    if self.log_pane:
+                        self.log_pane.clear_selection()
+
+        elif event.operation == "remove_unused_images" and event.success:
+            # Don't remove the images immediately - let the next refresh handle it
+            # Just clear selection if any removed image was selected
+            if self.container_list and event.item_ids:
+                if (
+                    self.container_list.selected_item
+                    and self.container_list.selected_item[0] == "image"
+                    and self.container_list.selected_item[1] in event.item_ids
+                ):
+                    self.container_list.selected_item = None
+                    if self.log_pane:
+                        self.log_pane.clear_selection()
+
+        # Trigger refresh to ensure UI is in sync with Docker state
         self.action_refresh()
 
 
