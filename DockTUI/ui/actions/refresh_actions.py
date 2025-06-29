@@ -30,8 +30,12 @@ class RefreshActions:
 
         try:
             # Add refreshing indicator to the existing title
-            if "Refreshing..." not in self.title:
-                self.title = self.title + "\nRefreshing..."
+            # Make sure the sub_title has padding to make it the same length as the title so it is centered
+            title_length = len(self.title)
+            subtitle_padding_spaces = ""
+            if title_length > 13:
+                subtitle_padding_spaces = " " * int((title_length - 13) * 0.5)
+            self.sub_title = "\n" + subtitle_padding_spaces + "Refreshing..."
 
             # Start the worker but don't block waiting for it
             # Textual's worker pattern will call the function and then process the results
@@ -242,7 +246,7 @@ class RefreshActions:
 
             # Update the app title with stats (removes any "Refreshing..." suffix)
             self.title = f"DockTUI - {total_networks} Networks, {total_stacks} Stacks, {total_running} Running, {total_exited} Exited"
-
+            self.sub_title = ""
             # Increment refresh count
             self._refresh_count += 1
 
