@@ -17,7 +17,7 @@ DockTUI is a terminal user interface (TUI) that provides a real-time dashboard f
 - 🎯 **Docker Compose Support** - Organized view of containers grouped by Compose stacks
 - 📜 **Interactive Log Viewer** - Stream logs with filtering, text selection, and clipboard support
 - ⚡ **Quick Actions** - Start, stop, restart, recreate containers and stacks with keyboard shortcuts
-- 🗂️ **Resource Management** - Manage images, volumes, and networks
+- 🗂️ **Resource Management** - Manage images, volumes, and networks with usage tracking
 - 🎨 **Clean Interface** - Intuitive terminal UI with collapsible sections and status bar
 - ⌨️ **Command Palette** - Quick access to all actions with Ctrl+\
 
@@ -82,10 +82,15 @@ poetry run DockTUI
 - `e` - Restart
 - `u` - Recreate (docker compose up -d)
 - `d` - Docker compose down
+- `r` - Remove selected stopped/exited container
 
 #### Image Management
 - `r` - Remove selected unused image
 - `R` - Remove all unused images
+
+#### Volume Management
+- `r` - Remove selected volume (when not in use)
+- `p` - Prune all unused volumes
 
 #### Quick Access
 - `Ctrl+\` - Open command palette
@@ -96,6 +101,16 @@ poetry run DockTUI
 - **Right-click** to copy selection
 - **Filter box** to search logs in real-time
 - **Auto-follow** checkbox to toggle automatic scrolling
+- **Mark Log Position** - Add timestamped markers to track important events
+
+### Volume Management
+
+DockTUI displays volumes in a table format showing:
+- Volume name and driver
+- Usage status (in-use or available)
+- Container count and names using each volume
+
+Volumes in use are shown first and cannot be removed. The status bar shows detailed information about which containers are using the selected volume.
 
 ## Configuration
 
