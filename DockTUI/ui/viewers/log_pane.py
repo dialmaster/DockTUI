@@ -491,6 +491,15 @@ class LogPane(Vertical):
         if not self.log_streamer:
             return
 
+        # Skip processing if user is actively selecting text
+        if (
+            self.log_display
+            and hasattr(self.log_display, "is_selecting")
+            and self.log_display.is_selecting
+        ):
+            logger.debug("Skipping log processing during active text selection")
+            return  # Will retry on next timer tick
+
         log_queue = self.log_streamer.get_queue()
 
         try:
@@ -744,6 +753,7 @@ class LogPane(Vertical):
 
             # Always display the marker and its context lines
             # The filter will ensure these are always shown together
+            # Note: _append_log_line now preserves selection automatically
             self._append_log_line("")
             self._append_log_line("")
             self._append_log_line(marker_text)
@@ -790,22 +800,50 @@ class LogPane(Vertical):
         Args:
             line: The log line to append
         """
+        # Save current selection before any operations
+        saved_selection = None
+        has_selection = not self.log_display.selection.is_empty
+        if has_selection:
+            # Import Selection class for manual restoration
+            from textual.document._document import Selection
+
+            saved_selection = Selection(
+                start=self.log_display.selection.start,
+                end=self.log_display.selection.end,
+            )
+            logger.debug(
+                f"Saving selection: start={saved_selection.start}, end={saved_selection.end}"
+            )
+
         # Save scroll position if not following
         if not self.auto_follow:
             saved_scroll_y = self.log_display.scroll_y
 
-        # Simply append the text
-        current_text = self.log_display.text
-        self.log_display.text = current_text + line + "\n"
+        # Use insert method to append text at the end of the document
+        # Note: maintain_selection_offset doesn't work as expected when we move cursor after
+        end_location = self.log_display.document.end
+        self.log_display.insert(
+            line + "\n", location=end_location, maintain_selection_offset=False
+        )
 
         # Handle scrolling based on auto-follow setting
         if self.auto_follow:
-            # Scroll to the bottom to follow new logs
-            self.log_display.move_cursor(self.log_display.document.end)
-            self.log_display.scroll_cursor_visible()
+            # Only move cursor if there's no selection (moving cursor clears selection)
+            if not has_selection:
+                # Scroll to the bottom to follow new logs
+                self.log_display.move_cursor(self.log_display.document.end)
+                self.log_display.scroll_cursor_visible()
         else:
             # Restore the scroll position to prevent jumping
             self.log_display.scroll_y = saved_scroll_y
+
+        # Restore selection if it existed
+        if saved_selection and has_selection:
+            try:
+                self.log_display.selection = saved_selection
+                logger.debug("Restored text selection after log update")
+            except Exception as e:
+                logger.debug(f"Could not restore selection: {e}")
 
     def _is_container_stopped(self, status: str) -> bool:
         """Check if a container status indicates it's stopped.
