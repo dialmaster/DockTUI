@@ -8,6 +8,7 @@ from typing import Dict, List, Tuple
 
 import docker
 
+from ..utils.formatting import format_bytes
 from ..utils.time_utils import format_uptime
 
 logger = logging.getLogger("DockTUI.docker_mgmt")
@@ -1064,3 +1065,100 @@ class DockerManager:
             logger.error(error_msg, exc_info=True)
             self.last_error = error_msg
             return False
+
+    def remove_volume(self, volume_name: str, force: bool = False) -> Tuple[bool, str]:
+        """Remove a Docker volume.
+
+        Args:
+            volume_name: Name of the volume to remove
+            force: Force removal even if the volume is in use
+
+        Returns:
+            Tuple[bool, str]: (success, message)
+        """
+        try:
+            volume = self.client.volumes.get(volume_name)
+            volume.remove(force=force)
+            logger.info(f"Successfully removed volume: {volume_name}")
+            return True, f"Volume '{volume_name}' removed successfully"
+        except docker.errors.NotFound:
+            msg = f"Volume '{volume_name}' not found"
+            logger.error(msg)
+            self.last_error = msg
+            return False, msg
+        except docker.errors.APIError as e:
+            if "volume is in use" in str(e).lower():
+                msg = f"Volume '{volume_name}' is in use by one or more containers"
+            else:
+                msg = f"Failed to remove volume: {str(e)}"
+            logger.error(msg)
+            self.last_error = msg
+            return False, msg
+        except Exception as e:
+            msg = f"Error removing volume: {str(e)}"
+            logger.error(msg, exc_info=True)
+            self.last_error = msg
+            return False, msg
+
+    def get_unused_volumes(self) -> List[Dict]:
+        """Get a list of unused volumes.
+
+        Returns:
+            List[Dict]: List of unused volume information
+        """
+        try:
+            all_volumes = self.get_volumes()
+
+            unused_volumes = []
+            for volume_name, volume_data in all_volumes.items():
+                if not volume_data.get("in_use", False):
+                    unused_volumes.append(volume_data)
+
+            return unused_volumes
+        except Exception as e:
+            logger.error(f"Error getting unused volumes: {str(e)}", exc_info=True)
+            self.last_error = f"Error getting unused volumes: {str(e)}"
+            return []
+
+    def remove_unused_volumes(self) -> Tuple[bool, str, int]:
+        """Remove all unused volumes using Docker prune.
+
+        Returns:
+            Tuple[bool, str, int]: (success, message, count of removed volumes)
+        """
+        try:
+            # Get list of unused volumes before pruning
+            unused_volumes = self.get_unused_volumes()
+            unused_count = len(unused_volumes)
+
+            if unused_count == 0:
+                return True, "No unused volumes to remove", 0
+
+            # Use Docker's prune command to remove all unused volumes
+            result = self.client.volumes.prune()
+
+            # Docker returns info about what was deleted
+            deleted_volumes = result.get("Volumes", [])
+
+            # Log each removed volume
+            if deleted_volumes:
+                for volume_name in deleted_volumes:
+                    logger.info(f"Removed unused volume: {volume_name}")
+            else:
+                # If Docker doesn't return specific volumes, log the count
+                logger.info(f"Removed {unused_count} unused volumes")
+            space_reclaimed = result.get("SpaceReclaimed", 0)
+
+            # Format space reclaimed
+            space_str = format_bytes(space_reclaimed)
+
+            removed_count = len(deleted_volumes) if deleted_volumes else unused_count
+            msg = f"Successfully removed {removed_count} unused volumes, freed {space_str}"
+            logger.info(msg)
+            return True, msg, removed_count
+
+        except Exception as e:
+            msg = f"Error removing unused volumes: {str(e)}"
+            logger.error(msg, exc_info=True)
+            self.last_error = msg
+            return False, msg, 0

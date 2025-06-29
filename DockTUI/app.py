@@ -1,5 +1,5 @@
 import logging
-from typing import Iterable, Union
+from typing import Dict, Iterable, Optional, Tuple, Union
 
 from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
@@ -13,12 +13,17 @@ from DockTUI.config import config
 from DockTUI.docker_mgmt.manager import DockerManager
 from DockTUI.ui.actions.docker_actions import DockerActions
 from DockTUI.ui.actions.refresh_actions import RefreshActions
-from DockTUI.ui.base.container_list_base import SelectionChanged
+from DockTUI.ui.base.container_list_base import (
+    DockerOperationCompleted,
+    SelectionChanged,
+)
 from DockTUI.ui.containers import ContainerList
 from DockTUI.ui.dialogs.confirm import (
     ComposeDownModal,
     RemoveImageModal,
     RemoveUnusedImagesModal,
+    RemoveUnusedVolumesModal,
+    RemoveVolumeModal,
 )
 from DockTUI.ui.viewers.log_pane import LogPane
 from DockTUI.ui.widgets.status import ErrorDisplay, StatusBar
@@ -98,6 +103,7 @@ class DockTUIApp(App, DockerActions, RefreshActions):
         Binding("d", "down", "Down Selected Stack", show=True),
         Binding("r", "remove", "Remove Selected", show=True),
         Binding("R", "remove_unused_images", "Remove All Unused Images", show=True),
+        Binding("p", "prune_unused_volumes", "Prune All Unused Volumes", show=True),
     ]
 
     def __init__(self):
@@ -179,6 +185,11 @@ class DockTUIApp(App, DockerActions, RefreshActions):
                     "Remove All Unused Images",
                     "Remove all unused Docker images",
                     self.action_remove_unused_images,
+                ),
+                (
+                    "Prune All Unused Volumes",
+                    "Remove all unused Docker volumes",
+                    self.action_prune_unused_volumes,
                 ),
             ]
 
@@ -346,6 +357,27 @@ class DockTUIApp(App, DockerActions, RefreshActions):
 
         self.push_screen(modal, handle_down_confirmation)
 
+    def _is_volume_removable(self, volume_data: Optional[Dict]) -> Tuple[bool, str]:
+        """Check if a volume can be removed.
+
+        Args:
+            volume_data: Volume data dictionary
+
+        Returns:
+            Tuple[bool, str]: (can_remove, error_message)
+        """
+        if not volume_data:
+            return False, "No volume data available"
+
+        if volume_data.get("in_use", False):
+            container_count = volume_data.get("container_count", 0)
+            return (
+                False,
+                f"Cannot remove volume: in use by {container_count} container(s)",
+            )
+
+        return True, ""
+
     def action_remove(self) -> None:
         """Context-aware remove action: removes container if stopped/exited, or image if selected."""
         if not self.container_list or not self.container_list.selected_item:
@@ -376,6 +408,25 @@ class DockTUIApp(App, DockerActions, RefreshActions):
         # Handle image removal (existing logic)
         elif item_type == "image":
             self._remove_image()
+        # Handle volume removal
+        elif item_type == "volume":
+            # Check if volume is not in use
+            volume_data = self.container_list.volume_manager.selected_volume_data
+            can_remove, error_msg = self._is_volume_removable(volume_data)
+
+            if not can_remove:
+                self.error_display.update(error_msg)
+                return
+
+            # Show confirmation dialog
+            modal = RemoveVolumeModal(volume_data)
+
+            def handle_remove_confirmation(confirmed: bool) -> None:
+                """Handle the result from the confirmation modal."""
+                if confirmed:
+                    self.execute_volume_command("remove_volume")
+
+            self.push_screen(modal, handle_remove_confirmation)
         else:
             self.error_display.update(f"Cannot remove {item_type}")
 
@@ -433,6 +484,24 @@ class DockTUIApp(App, DockerActions, RefreshActions):
 
         self.push_screen(modal, handle_remove_all_confirmation)
 
+    def action_prune_unused_volumes(self) -> None:
+        """Remove all unused volumes with confirmation dialog."""
+        unused_volumes = self.docker.get_unused_volumes()
+        unused_count = len(unused_volumes)
+
+        if unused_count == 0:
+            self.error_display.update("No unused volumes found")
+            return
+
+        modal = RemoveUnusedVolumesModal(unused_count)
+
+        def handle_remove_all_confirmation(confirmed: bool) -> None:
+            """Handle the result from the confirmation modal."""
+            if confirmed:
+                self.execute_volume_command("remove_unused_volumes")
+
+        self.push_screen(modal, handle_remove_all_confirmation)
+
     def check_action(self, action: str, parameters: tuple) -> Union[bool, None]:
         """Check if an action should be enabled.
 
@@ -447,7 +516,7 @@ class DockTUIApp(App, DockerActions, RefreshActions):
             "stack": ["start", "stop", "restart", "recreate", "down"],
             "network": [],
             "image": ["remove", "remove_unused_images"],
-            "volume": [],
+            "volume": ["remove", "prune_unused_volumes"],
             "none": [],
         }
 
@@ -486,6 +555,17 @@ class DockTUIApp(App, DockerActions, RefreshActions):
                         )
                         if container_names:
                             return None  # Show as disabled
+            elif selection_type == "volume":
+                # For volumes, check if they're in use
+                if self.container_list and self.container_list.selected_item:
+                    item_type, item_id = self.container_list.selected_item
+                    if item_type == "volume":
+                        volume_data = (
+                            self.container_list.volume_manager.selected_volume_data
+                        )
+                        can_remove, _ = self._is_volume_removable(volume_data)
+                        if not can_remove:
+                            return None  # Show as disabled
             else:
                 # Remove not applicable to other types
                 return False
@@ -518,6 +598,50 @@ class DockTUIApp(App, DockerActions, RefreshActions):
         else:
             self._current_selection_status = "none"
         self.refresh_bindings()
+
+    def on_docker_operation_completed(self, event: DockerOperationCompleted) -> None:
+        """Handle Docker operation completion events.
+
+        Args:
+            event: The operation completion event
+        """
+        # Update error display with result
+        if event.success:
+            self.error_display.update(event.message)
+        else:
+            self.error_display.update(f"Error: {event.message}")
+
+        # Handle specific operations
+        if event.operation == "remove_volume" and event.success:
+            # Simply clear the selection if it was the removed volume
+            if (
+                self.container_list
+                and event.item_id
+                and self.container_list.selected_item
+                and self.container_list.selected_item[0] == "volume"
+                and self.container_list.selected_item[1] == event.item_id
+            ):
+                # Clear selection since we're removing the selected volume
+                self.container_list.selected_item = None
+                if self.log_pane:
+                    self.log_pane.clear_selection()
+
+        elif event.operation == "remove_unused_volumes" and event.success:
+            # Clear selection if any removed volume was selected
+            if (
+                self.container_list
+                and event.item_ids
+                and self.container_list.selected_item
+                and self.container_list.selected_item[0] == "volume"
+                and self.container_list.selected_item[1] in event.item_ids
+            ):
+                # Clear selection since we're removing the selected volume
+                self.container_list.selected_item = None
+                if self.log_pane:
+                    self.log_pane.clear_selection()
+
+        # Trigger refresh to ensure UI is in sync
+        self.action_refresh()
 
 
 def main():

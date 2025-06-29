@@ -1,15 +1,22 @@
 """Volume-specific functionality for the container list widget."""
 
 import logging
-from typing import Dict, Optional
+from typing import Any, Dict, Optional, Set
 
 from rich.text import Text
 from textual.widgets import DataTable, Static
+from textual.widgets.data_table import RowKey
 
 from ..base.container_list_base import SelectionChanged
 from ..widgets.headers import SectionHeader
 
 logger = logging.getLogger("DockTUI.volume_manager")
+
+# Constants for UI formatting
+# Maximum length for container names display before truncation
+MAX_CONTAINER_NAMES_LENGTH = 37
+# Length at which to truncate container names
+TRUNCATED_LENGTH = 34
 
 
 class VolumeManager:
@@ -23,16 +30,18 @@ class VolumeManager:
         """
         self.parent = parent
         self.volume_table: Optional[DataTable] = None
-        self.volume_rows: Dict[str, int] = {}  # volume_name -> row_key
-        self._volumes_in_new_data = set()
-        self.selected_volume_data: Optional[Dict] = None
+        self.volume_rows: Dict[str, RowKey] = {}  # volume_name -> RowKey
+        self._volumes_in_new_data: Set[str] = set()
+        self.selected_volume_data: Optional[Dict[str, Any]] = None
         self.volume_section_header: Optional[SectionHeader] = None
         self._table_initialized = False
         self.loading_message: Optional[Static] = None
-        self._pending_volumes: Dict[str, dict] = {}  # Collect volumes before sorting
-        self._volume_data: Dict[str, dict] = {}  # Store volume data by name
+        self._pending_volumes: Dict[str, Dict[str, Any]] = (
+            {}
+        )  # Collect volumes before sorting
+        self._volume_data: Dict[str, Dict[str, Any]] = {}  # Store volume data by name
 
-    def add_volume(self, volume_data: dict) -> None:
+    def add_volume(self, volume_data: Dict[str, Any]) -> None:
         """Add a volume to pending volumes for later sorting and display.
 
         Args:
@@ -53,6 +62,7 @@ class VolumeManager:
             and self.parent.selected_item[1] == volume_name
         ):
             self.selected_volume_data = volume_data
+            self.parent.selected_volume_data = volume_data
 
     def _initialize_table(self) -> None:
         """Initialize and mount the volume data table."""
@@ -87,6 +97,83 @@ class VolumeManager:
             self.volume_table.display = True
             self.volume_table.styles.width = "100%"
 
+    def get_next_selection_after_removal(
+        self, removed_volume_names: Set[str]
+    ) -> Optional[str]:
+        """Determine which volume should be selected after removal.
+
+        Args:
+            removed_volume_names: Set of volume names being removed
+
+        Returns:
+            The volume name that should be selected, or None if no volumes remain
+        """
+        if not self.volume_table or not removed_volume_names:
+            return None
+
+        try:
+            current_selection = None
+            if self.parent.selected_item and self.parent.selected_item[0] == "volume":
+                current_selection = self.parent.selected_item[1]
+
+            # If current selection is not being removed, keep it
+            if current_selection and current_selection not in removed_volume_names:
+                return current_selection
+
+            # Get ordered list of all row keys
+            all_row_keys = list(self.volume_table.rows)
+            if not all_row_keys:
+                return None
+
+            # Find the first removed volume's position in the table
+            min_removed_idx = None
+            for volume_name in removed_volume_names:
+                if volume_name in self.volume_rows:
+                    row_key = self.volume_rows[volume_name]
+                    try:
+                        idx = all_row_keys.index(row_key)
+                        if min_removed_idx is None or idx < min_removed_idx:
+                            min_removed_idx = idx
+                    except ValueError:
+                        continue
+
+            if min_removed_idx is None:
+                return None
+
+            # Build a list of remaining volumes in order
+            remaining_volumes = []
+            for row_key in all_row_keys:
+                # Find volume name for this row key
+                for vol_name, vol_key in self.volume_rows.items():
+                    if vol_key == row_key and vol_name not in removed_volume_names:
+                        remaining_volumes.append(vol_name)
+                        break
+
+            if not remaining_volumes:
+                return None
+
+            # Find the best candidate:
+            # 1. Try the previous volume (before the first removed)
+            for i in range(min_removed_idx - 1, -1, -1):
+                row_key = all_row_keys[i]
+                for vol_name, vol_key in self.volume_rows.items():
+                    if vol_key == row_key and vol_name not in removed_volume_names:
+                        return vol_name
+
+            # 2. Try the next volume (after the removed ones)
+            for i in range(min_removed_idx, len(all_row_keys)):
+                row_key = all_row_keys[i]
+                for vol_name, vol_key in self.volume_rows.items():
+                    if vol_key == row_key and vol_name not in removed_volume_names:
+                        return vol_name
+
+            # 3. Fallback to first remaining volume
+            return remaining_volumes[0] if remaining_volumes else None
+
+        except Exception as e:
+            logger.error(f"Error finding next selection: {e}")
+            return None
+
     def remove_volume(self, volume_name: str) -> None:
         """Remove a volume from the table.
 
@@ -95,13 +182,21 @@ class VolumeManager:
         """
         if volume_name in self.volume_rows and self.volume_table:
             row_key = self.volume_rows[volume_name]
-            self.volume_table.remove_row(row_key)
-            del self.volume_rows[volume_name]
+            try:
+                self.volume_table.remove_row(row_key)
+                del self.volume_rows[volume_name]
+            except Exception as e:
+                logger.error(f"Error removing volume {volume_name} from table: {e}")
 
         # Remove from volume data
         if volume_name in self._volume_data:
             del self._volume_data[volume_name]
 
+        # Remove from pending volumes if present
+        if volume_name in self._pending_volumes:
+            del self._pending_volumes[volume_name]
+
+        # Clear selection if this volume was selected
         if (
             self.parent.selected_item
             and self.parent.selected_item[0] == "volume"
@@ -109,6 +204,8 @@ class VolumeManager:
         ):
             self.parent.selected_item = None
             self.selected_volume_data = None
+            # Also clear the parent's reference
+            self.parent.selected_volume_data = None
 
     def select_volume(self, volume_name: str) -> None:
         """Select a volume and update the footer.
@@ -123,9 +220,20 @@ class VolumeManager:
             self.parent.selected_stack_data = None
             self.parent.selected_network_data = None
 
+            # Get the volume data
+            volume_data = self._volume_data.get(volume_name, {})
+            self.selected_volume_data = volume_data
+            self.parent.selected_volume_data = volume_data
+
             # Move cursor to the selected volume
             row_key = self.volume_rows[volume_name]
-            self.volume_table.move_cursor(row=row_key)
+
+            # Verify the row key is still valid in the table
+            try:
+                if row_key in self.volume_table.rows:
+                    self.volume_table.move_cursor(row=row_key)
+            except Exception as e:
+                logger.error(f"Error moving cursor to volume {volume_name}: {e}")
 
             # Update the footer and cursor visibility
             self.parent._update_footer_with_selection()
@@ -133,7 +241,7 @@ class VolumeManager:
 
             # Post selection change message
             self.parent.post_message(
-                SelectionChanged("volume", volume_name, self.selected_volume_data)
+                SelectionChanged("volume", volume_name, volume_data)
             )
 
     def reset_tracking(self) -> None:
@@ -214,8 +322,8 @@ class VolumeManager:
             if container_names:
                 containers_text = ", ".join(container_names)
                 # Truncate if too long
-                if len(containers_text) > 37:
-                    containers_text = containers_text[:34] + "..."
+                if len(containers_text) > MAX_CONTAINER_NAMES_LENGTH:
+                    containers_text = containers_text[:TRUNCATED_LENGTH] + "..."
             else:
                 containers_text = "None"
 
@@ -229,6 +337,7 @@ class VolumeManager:
                     containers_text,
                     volume_data["driver"],
                 )
+                # Store the row key
                 self.volume_rows[volume_name] = row_key
                 self._volume_data[volume_name] = volume_data  # Store volume data
             else:
@@ -330,7 +439,7 @@ class VolumeManager:
         # Re-add rows in sorted order
         for row_data in sorted_rows:
             row_key = self.volume_table.add_row(*row_data["cells"])
-            # Reconstruct the volume_rows mapping
+            # Reconstruct the volume_rows mapping with row key
             volume_name = row_data["name"]
             self.volume_rows[volume_name] = row_key
 
@@ -347,15 +456,15 @@ class VolumeManager:
         """Get the volume table widget."""
         return self.volume_table
 
-    def handle_table_selection(self, row_key) -> None:
+    def handle_table_selection(self, row_key: RowKey) -> None:
         """Handle volume selection from table row selection.
 
         Args:
             row_key: The key of the selected row
         """
         # Find the volume name for this row key
-        for volume_name, key in self.volume_rows.items():
-            if key == row_key:
+        for volume_name, stored_key in self.volume_rows.items():
+            if stored_key == row_key:
                 self.parent.selected_item = ("volume", volume_name)
                 self.parent.selected_container_data = None
                 self.parent.selected_stack_data = None

@@ -844,6 +844,9 @@ class LogPane(Vertical):
         Returns:
             True if the item type has logs, False otherwise
         """
+        # Handle None item_data
+        if item_data is None:
+            item_data = {}
         item_name = item_data.get("name", item_id)
 
         if item_type == "container":

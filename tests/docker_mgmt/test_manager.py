@@ -824,3 +824,228 @@ class TestDockerManager:
 
         assert "test_volume" in volumes
         assert volumes["test_volume"]["stack"] is None
+
+    def test_remove_volume_success(self, manager, mock_docker_client):
+        """Test successful volume removal."""
+        mock_volume = Mock()
+        mock_volume.remove.return_value = None
+        mock_docker_client.volumes.get.return_value = mock_volume
+
+        success, message = manager.remove_volume("test_volume")
+
+        assert success is True
+        assert "removed successfully" in message
+        mock_docker_client.volumes.get.assert_called_once_with("test_volume")
+        mock_volume.remove.assert_called_once_with(force=False)
+
+    def test_remove_volume_force(self, manager, mock_docker_client):
+        """Test volume removal with force flag."""
+        mock_volume = Mock()
+        mock_volume.remove.return_value = None
+        mock_docker_client.volumes.get.return_value = mock_volume
+
+        success, message = manager.remove_volume("test_volume", force=True)
+
+        assert success is True
+        assert "removed successfully" in message
+        mock_volume.remove.assert_called_once_with(force=True)
+
+    def test_remove_volume_not_found(self, manager, mock_docker_client):
+        """Test removing non-existent volume."""
+        mock_docker_client.volumes.get.side_effect = docker.errors.NotFound("Volume not found")
+
+        success, message = manager.remove_volume("nonexistent_volume")
+
+        assert success is False
+        assert "not found" in message
+
+    def test_remove_volume_in_use(self, manager, mock_docker_client):
+        """Test removing volume that is in use."""
+        mock_volume = Mock()
+        mock_volume.remove.side_effect = docker.errors.APIError("volume is in use")
+        mock_docker_client.volumes.get.return_value = mock_volume
+
+        success, message = manager.remove_volume("in_use_volume")
+
+        assert success is False
+        assert "in use" in message
+
+    def test_remove_volume_api_error(self, manager, mock_docker_client):
+        """Test volume removal with generic API error."""
+        mock_volume = Mock()
+        mock_volume.remove.side_effect = docker.errors.APIError("Generic API error")
+        mock_docker_client.volumes.get.return_value = mock_volume
+
+        success, message = manager.remove_volume("test_volume")
+
+        assert success is False
+        assert "Failed to remove volume" in message
+
+    def test_get_unused_volumes(self, manager, mock_docker_client):
+        """Test getting list of unused volumes."""
+        # Mock volumes
+        mock_volume1 = Mock()
+        mock_volume1.id = "volume1"
+        mock_volume1.name = "unused_volume"
+        mock_volume1.attrs = {
+            "Driver": "local",
+            "Mountpoint": "/var/lib/docker/volumes/unused_volume/_data",
+            "Labels": {},
+            "Scope": "local"
+        }
+
+        mock_volume2 = Mock()
+        mock_volume2.id = "volume2"
+        mock_volume2.name = "used_volume"
+        mock_volume2.attrs = {
+            "Driver": "local",
+            "Mountpoint": "/var/lib/docker/volumes/used_volume/_data",
+            "Labels": {},
+            "Scope": "local"
+        }
+
+        # Mock container using volume2
+        mock_container = Mock()
+        mock_container.name = "test_container"
+        mock_container.id = "container1"
+        mock_container.labels = {}
+        mock_container.attrs = {
+            "State": {"Status": "running"},
+            "Config": {"Image": "test:latest", "Hostname": "test"},
+            "HostConfig": {"PortBindings": {}},
+            "NetworkSettings": {"Networks": {}},
+            "Mounts": [
+                {
+                    "Type": "volume",
+                    "Name": "used_volume",
+                    "Source": "/var/lib/docker/volumes/used_volume/_data",
+                    "Destination": "/data"
+                }
+            ]
+        }
+        mock_container.status = "running"
+        mock_container.image = Mock(tags=["test:latest"])
+
+        mock_docker_client.volumes.list.return_value = [mock_volume1, mock_volume2]
+        # Need to mock containers.list with all=True parameter
+        mock_docker_client.containers.list.side_effect = lambda all=False: [mock_container] if all else []
+
+        # Call get_containers first to populate _volume_usage
+        manager.get_containers()
+        
+        unused_volumes = manager.get_unused_volumes()
+
+        assert len(unused_volumes) == 1
+        assert unused_volumes[0]["name"] == "unused_volume"
+        assert unused_volumes[0]["in_use"] is False
+
+    def test_get_unused_volumes_error(self, manager, mock_docker_client):
+        """Test get_unused_volumes with error."""
+        mock_docker_client.volumes.list.side_effect = docker.errors.APIError("API error")
+
+        unused_volumes = manager.get_unused_volumes()
+
+        assert unused_volumes == []
+        # The error comes from get_volumes, not get_unused_volumes
+        assert "Error getting volumes" in manager.last_error
+
+    def test_remove_unused_volumes_success(self, manager, mock_docker_client):
+        """Test successful removal of unused volumes."""
+        # Mock unused volumes
+        mock_volume = Mock()
+        mock_volume.id = "volume1"
+        mock_volume.name = "unused_volume"
+        mock_volume.attrs = {
+            "Driver": "local",
+            "Mountpoint": "/var/lib/docker/volumes/unused_volume/_data",
+            "Labels": {},
+            "Scope": "local"
+        }
+
+        mock_docker_client.volumes.list.return_value = [mock_volume]
+        mock_docker_client.containers.list.return_value = []
+        
+        # Mock prune result
+        prune_result = {
+            "Volumes": ["unused_volume"],
+            "SpaceReclaimed": 1073741824  # 1 GB
+        }
+        mock_docker_client.volumes.prune.return_value = prune_result
+
+        success, message, count = manager.remove_unused_volumes()
+
+        assert success is True
+        assert "1 unused volumes" in message
+        assert "1.0 GB" in message
+        assert count == 1
+        mock_docker_client.volumes.prune.assert_called_once()
+
+    def test_remove_unused_volumes_no_volumes(self, manager, mock_docker_client):
+        """Test remove_unused_volumes when no unused volumes exist."""
+        mock_docker_client.volumes.list.return_value = []
+        mock_docker_client.containers.list.return_value = []
+
+        success, message, count = manager.remove_unused_volumes()
+
+        assert success is True
+        assert "No unused volumes to remove" in message
+        assert count == 0
+        mock_docker_client.volumes.prune.assert_not_called()
+
+    def test_remove_unused_volumes_space_formatting(self, manager, mock_docker_client):
+        """Test remove_unused_volumes with different space reclaimed values."""
+        # Mock volume
+        mock_volume = Mock()
+        mock_volume.id = "volume1"
+        mock_volume.name = "unused_volume"
+        mock_volume.attrs = {
+            "Driver": "local",
+            "Mountpoint": "/var/lib/docker/volumes/unused_volume/_data",
+            "Labels": {},
+            "Scope": "local"
+        }
+
+        mock_docker_client.volumes.list.return_value = [mock_volume]
+        mock_docker_client.containers.list.return_value = []
+
+        # Test KB formatting
+        prune_result = {
+            "Volumes": ["unused_volume"],
+            "SpaceReclaimed": 5120  # 5 KB
+        }
+        mock_docker_client.volumes.prune.return_value = prune_result
+
+        success, message, count = manager.remove_unused_volumes()
+        assert "5.0 KB" in message
+
+        # Test MB formatting
+        prune_result["SpaceReclaimed"] = 10485760  # 10 MB
+        success, message, count = manager.remove_unused_volumes()
+        assert "10.0 MB" in message
+
+        # Test Bytes formatting
+        prune_result["SpaceReclaimed"] = 512  # 512 B
+        success, message, count = manager.remove_unused_volumes()
+        assert "512 B" in message
+
+    def test_remove_unused_volumes_error(self, manager, mock_docker_client):
+        """Test remove_unused_volumes with error."""
+        mock_volume = Mock()
+        mock_volume.id = "volume1"
+        mock_volume.name = "unused_volume"
+        mock_volume.attrs = {
+            "Driver": "local",
+            "Mountpoint": "/var/lib/docker/volumes/unused_volume/_data",
+            "Labels": {},
+            "Scope": "local"
+        }
+
+        mock_docker_client.volumes.list.return_value = [mock_volume]
+        mock_docker_client.containers.list.return_value = []
+        mock_docker_client.volumes.prune.side_effect = docker.errors.APIError("Prune failed")
+
+        success, message, count = manager.remove_unused_volumes()
+
+        assert success is False
+        assert "Error removing unused volumes" in message
+        assert count == 0
