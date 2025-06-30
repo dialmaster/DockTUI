@@ -328,6 +328,8 @@ class LogPane(Vertical):
             item_id: ID of the item
             item_data: Dictionary containing item information
         """
+        # Save dropdown states before any UI updates
+        dropdown_states = self._save_dropdown_states()
 
         # Check if this is the same item that's already selected
         if self.current_item == (item_type, item_id):
@@ -342,6 +344,10 @@ class LogPane(Vertical):
                 ) and self._is_container_stopped(new_status):
                     # Container was stopped, update the display
                     self._handle_status_change(item_data)
+                    # Restore dropdown states after UI updates
+                    self.call_after_refresh(
+                        self._restore_dropdown_states, dropdown_states
+                    )
                     return
 
                 # Check if container started
@@ -350,10 +356,16 @@ class LogPane(Vertical):
                 ) and self._is_container_running(new_status):
                     # Container was started, resume logs
                     self._handle_status_change(item_data)
+                    # Restore dropdown states after UI updates
+                    self.call_after_refresh(
+                        self._restore_dropdown_states, dropdown_states
+                    )
                     return
 
             # Update the stored data but don't restart logs for the same selection
             self.current_item_data = item_data
+            # Restore dropdown states even when returning early
+            self.call_after_refresh(self._restore_dropdown_states, dropdown_states)
             return
 
         # Update state
@@ -362,6 +374,8 @@ class LogPane(Vertical):
 
         # Update header and check if item type has logs
         if not self._update_header_for_item(item_type, item_id, item_data):
+            # Restore dropdown states even when returning early
+            self.call_after_refresh(self._restore_dropdown_states, dropdown_states)
             return  # Item type doesn't have logs
 
         # Show log display, hide no-selection display
@@ -390,8 +404,13 @@ class LogPane(Vertical):
         # Start streaming logs without refresh to avoid blocking
         self._start_logs()
 
+        # Restore dropdown states after all UI updates
+        self.call_after_refresh(self._restore_dropdown_states, dropdown_states)
+
     def clear_selection(self):
         """Clear the current selection and show the no-selection state."""
+        # Save dropdown states before any UI updates
+        dropdown_states = self._save_dropdown_states()
 
         # Stop any existing log streaming
         if self.log_streamer:
@@ -412,6 +431,9 @@ class LogPane(Vertical):
 
         # Refresh to ensure visibility changes take effect
         self.refresh()
+
+        # Restore dropdown states after refresh
+        self.call_after_refresh(self._restore_dropdown_states, dropdown_states)
 
     def _handle_status_change(self, item_data: dict):
         """Handle container status changes (started/stopped).
@@ -947,3 +969,42 @@ class LogPane(Vertical):
             id="since-select",
             classes="log-setting",
         )
+
+    def _save_dropdown_states(self) -> dict:
+        """Save the expanded state of dropdown widgets.
+
+        Returns:
+            dict: Dictionary containing the expanded state of each dropdown
+        """
+        states = {
+            "tail_expanded": False,
+            "since_expanded": False,
+        }
+
+        # Check if dropdowns exist and save their expanded state
+        if self.tail_select:
+            states["tail_expanded"] = self.tail_select.expanded
+        if self.since_select:
+            states["since_expanded"] = self.since_select.expanded
+
+        logger.debug(f"Saved dropdown states: {states}")
+        return states
+
+    def _restore_dropdown_states(self, states: dict) -> None:
+        """Restore the expanded state of dropdown widgets.
+
+        Args:
+            states: Dictionary containing the saved dropdown states
+        """
+        if not states:
+            return
+
+        # Restore tail dropdown state
+        if states.get("tail_expanded") and self.tail_select:
+            logger.debug("Restoring tail dropdown expanded state")
+            self.tail_select.action_show_overlay()
+
+        # Restore since dropdown state
+        elif states.get("since_expanded") and self.since_select:
+            logger.debug("Restoring since dropdown expanded state")
+            self.since_select.action_show_overlay()

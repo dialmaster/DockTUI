@@ -40,6 +40,11 @@ class MockLogTextArea:
     def scroll_cursor_visible(self):
         """Mock scroll cursor visible method."""
         pass
+    
+    def clear(self):
+        """Mock clear method."""
+        self.text = ""
+        self.document.end = (0, 0)
 
 
 class TestLogPane:
@@ -368,3 +373,151 @@ class TestLogPane:
         
         # Should not append any lines
         log_pane._append_log_line.assert_not_called()
+
+    def test_save_dropdown_states(self, log_pane):
+        """Test saving dropdown states."""
+        # Create mock dropdowns
+        log_pane.tail_select = Mock()
+        log_pane.tail_select.expanded = True
+        log_pane.since_select = Mock()
+        log_pane.since_select.expanded = False
+        
+        # Call _save_dropdown_states
+        states = log_pane._save_dropdown_states()
+        
+        # Should return correct states
+        assert states == {
+            "tail_expanded": True,
+            "since_expanded": False,
+        }
+
+    def test_save_dropdown_states_missing_dropdowns(self, log_pane):
+        """Test saving dropdown states when dropdowns don't exist."""
+        # Set dropdowns to None
+        log_pane.tail_select = None
+        log_pane.since_select = None
+        
+        # Call _save_dropdown_states
+        states = log_pane._save_dropdown_states()
+        
+        # Should return False for both
+        assert states == {
+            "tail_expanded": False,
+            "since_expanded": False,
+        }
+
+    def test_restore_dropdown_states_tail_expanded(self, log_pane):
+        """Test restoring tail dropdown expanded state."""
+        # Create mock dropdowns
+        log_pane.tail_select = Mock()
+        log_pane.tail_select.action_show_overlay = Mock()
+        log_pane.since_select = Mock()
+        log_pane.since_select.action_show_overlay = Mock()
+        
+        # Call _restore_dropdown_states with tail expanded
+        states = {"tail_expanded": True, "since_expanded": False}
+        log_pane._restore_dropdown_states(states)
+        
+        # Should restore tail dropdown
+        log_pane.tail_select.action_show_overlay.assert_called_once()
+        log_pane.since_select.action_show_overlay.assert_not_called()
+
+    def test_restore_dropdown_states_since_expanded(self, log_pane):
+        """Test restoring since dropdown expanded state."""
+        # Create mock dropdowns
+        log_pane.tail_select = Mock()
+        log_pane.tail_select.action_show_overlay = Mock()
+        log_pane.since_select = Mock()
+        log_pane.since_select.action_show_overlay = Mock()
+        
+        # Call _restore_dropdown_states with since expanded
+        states = {"tail_expanded": False, "since_expanded": True}
+        log_pane._restore_dropdown_states(states)
+        
+        # Should restore since dropdown
+        log_pane.tail_select.action_show_overlay.assert_not_called()
+        log_pane.since_select.action_show_overlay.assert_called_once()
+
+    def test_restore_dropdown_states_none_expanded(self, log_pane):
+        """Test restoring dropdown states when none are expanded."""
+        # Create mock dropdowns
+        log_pane.tail_select = Mock()
+        log_pane.tail_select.action_show_overlay = Mock()
+        log_pane.since_select = Mock()
+        log_pane.since_select.action_show_overlay = Mock()
+        
+        # Call _restore_dropdown_states with none expanded
+        states = {"tail_expanded": False, "since_expanded": False}
+        log_pane._restore_dropdown_states(states)
+        
+        # Should not restore any dropdown
+        log_pane.tail_select.action_show_overlay.assert_not_called()
+        log_pane.since_select.action_show_overlay.assert_not_called()
+
+    def test_restore_dropdown_states_empty_states(self, log_pane):
+        """Test restoring dropdown states with empty states dict."""
+        # Create mock dropdowns
+        log_pane.tail_select = Mock()
+        log_pane.tail_select.action_show_overlay = Mock()
+        log_pane.since_select = Mock()
+        log_pane.since_select.action_show_overlay = Mock()
+        
+        # Call _restore_dropdown_states with empty states
+        log_pane._restore_dropdown_states({})
+        
+        # Should not restore any dropdown
+        log_pane.tail_select.action_show_overlay.assert_not_called()
+        log_pane.since_select.action_show_overlay.assert_not_called()
+
+    def test_restore_dropdown_states_missing_dropdowns(self, log_pane):
+        """Test restoring dropdown states when dropdowns don't exist."""
+        # Set dropdowns to None
+        log_pane.tail_select = None
+        log_pane.since_select = None
+        
+        # Call _restore_dropdown_states - should not raise
+        states = {"tail_expanded": True, "since_expanded": True}
+        log_pane._restore_dropdown_states(states)
+
+    def test_update_selection_preserves_dropdown_state(self, log_pane):
+        """Test that update_selection preserves dropdown states."""
+        # Mock dependencies
+        log_pane._save_dropdown_states = Mock(return_value={"tail_expanded": True})
+        log_pane._restore_dropdown_states = Mock()
+        log_pane.call_after_refresh = Mock()
+        log_pane._update_header_for_item = Mock(return_value=True)
+        log_pane._show_logs_ui = Mock()
+        log_pane._clear_logs = Mock()
+        log_pane._start_logs = Mock()
+        
+        # Call update_selection
+        log_pane.update_selection("container", "test_id", {"name": "test"})
+        
+        # Should save and restore dropdown states
+        log_pane._save_dropdown_states.assert_called_once()
+        assert log_pane.call_after_refresh.called
+        # Check that _restore_dropdown_states is passed to call_after_refresh
+        call_args = log_pane.call_after_refresh.call_args[0]
+        assert call_args[0] == log_pane._restore_dropdown_states
+        assert call_args[1] == {"tail_expanded": True}
+
+    def test_clear_selection_preserves_dropdown_state(self, log_pane):
+        """Test that clear_selection preserves dropdown states."""
+        # Mock dependencies
+        log_pane._save_dropdown_states = Mock(return_value={"since_expanded": True})
+        log_pane._restore_dropdown_states = Mock()
+        log_pane.call_after_refresh = Mock()
+        log_pane._show_no_selection_ui = Mock()
+        log_pane._clear_logs = Mock()
+        log_pane.header = Mock()
+        
+        # Call clear_selection
+        log_pane.clear_selection()
+        
+        # Should save and restore dropdown states
+        log_pane._save_dropdown_states.assert_called_once()
+        assert log_pane.call_after_refresh.called
+        # Check that _restore_dropdown_states is passed to call_after_refresh
+        call_args = log_pane.call_after_refresh.call_args[0]
+        assert call_args[0] == log_pane._restore_dropdown_states
+        assert call_args[1] == {"since_expanded": True}
