@@ -495,8 +495,9 @@ class ImageManager:
     def sort_images_table(self) -> None:
         """Sort the images table:
         1) Status (Active, Stopped, Unused)
-        2) Created (newest → oldest)
-        3) Image ID (lexicographic)
+        2) Image Repository Name
+        3) Created (newest → oldest)
+        4) Image ID (lexicographic)
         """
         if not self.images_table or self.images_table.row_count == 0:
             return
@@ -534,6 +535,7 @@ class ImageManager:
 
         def sort_key(item):
             image_id, cells = item
+            repository = cells[0]  # Repository is the first column
             status = cells[6]
             created = cells[4]
 
@@ -541,8 +543,13 @@ class ImageManager:
                 0 if status == "Active" else 1 if status == "Stopped" else 2  # Unused
             )
 
+            # Sort <none> repositories to the bottom within each status group
+            repo_sort_key = (
+                (1, "") if repository == "<none>" else (0, repository.lower())
+            )
+
             # Negative timestamp → newest first
-            return (status_order, -_created_ts(created), image_id)
+            return (status_order, repo_sort_key, -_created_ts(created), image_id)
 
         rows_data.sort(key=sort_key)
 
