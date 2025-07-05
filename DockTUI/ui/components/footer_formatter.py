@@ -212,7 +212,6 @@ class FooterFormatter:
         selection_text = Text()
 
         # First line
-        selection_text.append("  Container: ", Style(color="white"))
         selection_text.append(
             f"{container_data['name']}", Style(color="white", bold=True)
         )
@@ -247,7 +246,7 @@ class FooterFormatter:
 
         # Add second line with image information
         if "image_id" in container_data or "image_name" in container_data:
-            selection_text.append("\n  Container Image: ", Style(color="white"))
+            selection_text.append("\n  Image: ", Style(color="white"))
 
             # Add image ID if available
             if "image_id" in container_data and container_data["image_id"]:
