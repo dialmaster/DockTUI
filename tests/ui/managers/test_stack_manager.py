@@ -30,6 +30,8 @@ class TestStackManager(unittest.TestCase):
         self.parent.stacks_container.children = []
         self.parent._is_updating = False
         self.parent._status_overrides = {}
+        self.parent._stack_status_overrides = {}
+        self.parent.get_stack_status = Mock(return_value=None)
         self.parent.screen = None
 
         self.manager = StackManager(self.parent)
@@ -71,7 +73,8 @@ class TestStackManager(unittest.TestCase):
             "test-stack",
             "/path/to/compose.yml",
             2, 1, 3,
-            True, True
+            True, True,
+            None  # operation_status
         )
 
         # Check table was created

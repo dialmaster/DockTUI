@@ -159,21 +159,77 @@ class DockerActions:
                         "config_file", ""
                     )
 
-                    success = self.docker.execute_stack_command(
-                        stack_name, config_file, command
-                    )
+                    # Set up status message
+                    status_map = {
+                        "start": "Starting...",
+                        "stop": "Stopping...",
+                        "restart": "Restarting...",
+                        "recreate": "Recreating...",
+                        "down": "Taking down...",
+                        "down_remove_volumes": "Taking down (with volumes)...",
+                    }
+
+                    # Get the appropriate status message
                     if command.startswith("down"):
-                        action_verb = "Taking down"
-                        message = f"{action_verb} stack: {stack_name}"
-                        if "remove_volumes" in command:
-                            message += " (including volumes)"
-                    else:
-                        action_verb = (
-                            "Recreating"
-                            if command == "recreate"
-                            else f"{command.capitalize()}ing"
+                        status_key = (
+                            "down_remove_volumes"
+                            if "remove_volumes" in command
+                            else "down"
                         )
-                        message = f"{action_verb} stack: {stack_name}"
+                    else:
+                        status_key = command
+
+                    status_message = status_map.get(
+                        status_key, f"{command.capitalize()}ing..."
+                    )
+
+                    # Update UI immediately with operation status
+                    self.container_list.set_stack_status(stack_name, status_message)
+
+                    # Update the stack header directly if it exists
+                    if (
+                        hasattr(self.container_list, "stack_manager")
+                        and stack_name
+                        in self.container_list.stack_manager.stack_headers
+                    ):
+                        header = self.container_list.stack_manager.stack_headers[
+                            stack_name
+                        ]
+                        header.operation_status = status_message
+                        header._update_content()
+
+                    # Also set status for all containers in the stack
+                    # Extract the base command (remove :remove_volumes suffix if present)
+                    base_command = command.split(":")[0] if ":" in command else command
+                    self.container_list.set_stack_containers_status(
+                        stack_name, base_command
+                    )
+
+                    # Force a UI refresh to show the updated container statuses
+                    self.refresh()
+
+                    # Execute command in background thread
+                    def execute_and_clear():
+                        success = self.docker.execute_stack_command(
+                            stack_name, config_file, command
+                        )
+                        # Clear stack status immediately
+                        self.call_from_thread(
+                            self.container_list.clear_stack_status, stack_name
+                        )
+                        # Container statuses will auto-clear when they're no longer relevant
+                        # (handled in stack_manager.py based on actual container state)
+                        if not success:
+                            self.call_from_thread(
+                                self.error_display.update,
+                                f"Error {command}ing stack: {self.docker.last_error}",
+                            )
+
+                    thread = threading.Thread(target=execute_and_clear)
+                    thread.daemon = True
+                    thread.start()
+
+                    success = True  # Return success for immediate UI feedback
                 else:
                     self.error_display.update(f"Missing stack data for {item_id}")
                     return
@@ -182,13 +238,7 @@ class DockerActions:
                 return
 
             if success:
-                # For container operations, the status is shown in the container list
-                # For stack operations, we still show the message
-                if item_type == "stack":
-                    # Show a temporary message in the error display
-                    self.error_display.update(message)
-                    # Schedule clearing the message after a few seconds
-                    self.set_timer(3, lambda: self.error_display.update(""))
+                # Status is now shown in the UI elements themselves (containers/stacks)
                 # Schedule a refresh after a short delay to update the UI
                 self.set_timer(2, self.action_refresh)
             else:

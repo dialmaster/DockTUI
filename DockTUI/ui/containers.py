@@ -1,6 +1,8 @@
 """Main container list widget implementation."""
 
 import logging
+import time
+from typing import Optional
 
 from rich.text import Text
 from textual.widgets import DataTable, Static
@@ -26,6 +28,10 @@ class ContainerList(ContainerListBase):
     def __init__(self):
         """Initialize the container list widget with resource managers."""
         super().__init__()
+
+        # Initialize stack status overrides early to ensure it exists
+        self._stack_status_overrides = {}
+
         # Initialize managers
         self.image_manager = ImageManager(self)
         self.volume_manager = VolumeManager(self)
@@ -525,6 +531,15 @@ class ContainerList(ContainerListBase):
         ):
             del self._status_overrides[container_id]
 
+        if (
+            hasattr(self, "_status_override_times")
+            and container_id in self._status_override_times
+        ):
+            del self._status_override_times[container_id]
+
+        # Note: We don't update the table cell here because we'll let the next
+        # refresh cycle update it with the actual container status
+
     def update_container_status(self, container_id: str, status: str) -> None:
         """Set a status override for a container.
 
@@ -532,10 +547,144 @@ class ContainerList(ContainerListBase):
             container_id: The short ID of the container
             status: The new status to display (e.g., "starting...", "stopping...")
         """
-        # Store the override status - it will be used during the next refresh
+        # Store the override status with timestamp - it will be used during the next refresh
         if not hasattr(self, "_status_overrides"):
             self._status_overrides = {}
+        if not hasattr(self, "_status_override_times"):
+            self._status_override_times = {}
+
         self._status_overrides[container_id] = status
+        self._status_override_times[container_id] = time.time()
+
+    def set_stack_status(self, stack_name: str, status: str) -> None:
+        """Set a status override for a stack.
+
+        Args:
+            stack_name: The name of the stack
+            status: The operation status to display (e.g., "Starting...", "Stopping...")
+        """
+        # Always ensure the dictionary exists
+        if not hasattr(self, "_stack_status_overrides"):
+            self._stack_status_overrides = {}
+        self._stack_status_overrides[stack_name] = status
+
+    def clear_stack_status(self, stack_name: str) -> None:
+        """Clear the status override for a stack.
+
+        Args:
+            stack_name: The name of the stack
+        """
+        if (
+            hasattr(self, "_stack_status_overrides")
+            and stack_name in self._stack_status_overrides
+        ):
+            del self._stack_status_overrides[stack_name]
+
+    def get_stack_status(self, stack_name: str) -> Optional[str]:
+        """Get the current status override for a stack.
+
+        Args:
+            stack_name: The name of the stack
+
+        Returns:
+            The status override if set, None otherwise
+        """
+        if hasattr(self, "_stack_status_overrides"):
+            return self._stack_status_overrides.get(stack_name)
+        return None
+
+    def set_stack_containers_status(self, stack_name: str, command: str) -> None:
+        """Set status overrides for all containers in a stack based on the operation.
+
+        Args:
+            stack_name: The name of the stack
+            command: The command being executed (start, stop, restart, recreate, down)
+        """
+        if not hasattr(self, "stack_manager"):
+            return
+
+        # Make sure the stack is expanded to show the containers
+        if stack_name in self.stack_manager.stack_headers:
+            header = self.stack_manager.stack_headers[stack_name]
+            if not header.expanded:
+                header.expanded = True
+                if stack_name in self.stack_manager.stack_tables:
+                    self.stack_manager.stack_tables[stack_name].styles.display = "block"
+                header._update_content()
+
+        # Get all containers for this stack with their current status
+        containers_to_update = []
+        if stack_name in self.stack_manager.stack_tables:
+            table = self.stack_manager.stack_tables[stack_name]
+            for row_key in table.rows:
+                try:
+                    # Get container ID and current status
+                    row = table.get_row(row_key)
+                    if len(row) >= 3:
+                        container_id = str(row[0])  # ID column
+                        current_status = str(row[2]).lower()  # Status column
+                        containers_to_update.append((container_id, current_status))
+                except Exception as e:
+                    logger.error(f"Error getting row data: {e}")
+
+        # Set status overrides for each container based on the operation and current status
+        updated_count = 0
+        for container_id, current_status in containers_to_update:
+            try:
+                # Be smart about which containers get transition states
+                if command in ["stop", "down"]:
+                    # Only show "stopping..." for containers that are running
+                    if current_status in ["running", "restarting"]:
+                        self.update_container_status(container_id, "stopping...")
+                        updated_count += 1
+                elif command == "start":
+                    # Only show "starting..." for containers that are stopped
+                    if current_status in ["exited", "stopped", "created"]:
+                        self.update_container_status(container_id, "starting...")
+                        updated_count += 1
+                elif command == "restart":
+                    # Only show "restarting..." for containers that are running
+                    if current_status in ["running", "restarting"]:
+                        self.update_container_status(container_id, "restarting...")
+                        updated_count += 1
+                elif command == "recreate":
+                    # For recreate at stack level, show transition state for:
+                    # 1. Containers that are not running (they will be recreated)
+                    # 2. Running containers may or may not be recreated depending on changes
+                    # We'll be conservative and only show for non-running containers
+                    if current_status not in ["running"]:
+                        self.update_container_status(container_id, "recreating...")
+                        updated_count += 1
+            except Exception as e:
+                logger.error(
+                    f"Error setting status for container {container_id}: {e}",
+                    exc_info=True,
+                )
+
+    def clear_stack_containers_status(self, stack_name: str) -> None:
+        """Clear status overrides for all containers in a stack.
+
+        Args:
+            stack_name: The name of the stack
+        """
+        if not hasattr(self, "stack_manager"):
+            return
+
+        # Get all containers for this stack
+        container_ids = []
+        if stack_name in self.stack_manager.stack_tables:
+            table = self.stack_manager.stack_tables[stack_name]
+            for row_key in table.rows:
+                try:
+                    row = table.get_row(row_key)
+                    if len(row) >= 1:
+                        container_ids.append(str(row[0]))  # ID column
+                except Exception as e:
+                    logger.error(f"Error getting container ID from row: {e}")
+
+        # Clear status for each container
+        for container_id in container_ids:
+            self.clear_status_override(container_id)
 
     def _restore_selection(self) -> None:
         """Restore the previously selected item after a refresh."""
