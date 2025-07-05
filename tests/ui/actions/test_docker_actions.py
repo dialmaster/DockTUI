@@ -18,6 +18,8 @@ class MockDockTUIApp(DockerActions):
     def __init__(self):
         super().__init__()
         self.container_list = Mock()
+        self.container_list.set_stack_containers_status = Mock()
+        self.container_list.clear_stack_containers_status = Mock()
         self.error_display = Mock()
         self.docker = Mock()
         self.log_pane = Mock()
@@ -199,7 +201,8 @@ class TestDockerActions:
             "test-container", "recreating..."
         )
 
-    def test_execute_docker_command_stack_start(self):
+    @patch("threading.Thread")
+    def test_execute_docker_command_stack_start(self, mock_thread):
         """Test execute_docker_command for stack start."""
         app = MockDockTUIApp()
         app.container_list.selected_item = ("stack", "test-stack")
@@ -207,19 +210,38 @@ class TestDockerActions:
             "name": "my-stack",
             "config_file": "/path/to/compose.yml",
         }
+        app.container_list.stack_manager = Mock()
+        app.container_list.stack_manager.stack_headers = {"my-stack": Mock()}
+        app.container_list.stack_manager.container_rows = {}  # Add container_rows mock
         app.docker.execute_stack_command.return_value = True
 
         app.execute_docker_command("start")
 
-        app.docker.execute_stack_command.assert_called_once_with(
-            "my-stack", "/path/to/compose.yml", "start"
+        # Check that set_stack_status was called instead of error_display
+        app.container_list.set_stack_status.assert_called_once_with(
+            "my-stack", "Starting..."
         )
-        app.error_display.update.assert_called_with("Starting stack: my-stack")
+        
+        # Check that set_stack_containers_status was called
+        app.container_list.set_stack_containers_status.assert_called_once_with(
+            "my-stack", "start"
+        )
+        
+        # Check that refresh was called to update the UI
+        app.refresh.assert_called_once()
+        
+        # Check that a timer was set to call action_refresh
+        assert len(app._timers) == 1
+        assert app._timers[0][0] == 2  # 2 second delay
+        assert app._timers[0][1] == app.action_refresh
+        
+        # The actual execute_stack_command is called in a background thread
+        # so we check that a thread was started
+        mock_thread.assert_called_once()
+        mock_thread.return_value.start.assert_called_once()
 
-        # Check that timer was set
-        assert len(app._timers) == 2  # One for message clear, one for refresh
-
-    def test_execute_docker_command_stack_down(self):
+    @patch("threading.Thread")
+    def test_execute_docker_command_stack_down(self, mock_thread):
         """Test execute_docker_command for stack down."""
         app = MockDockTUIApp()
         app.container_list.selected_item = ("stack", "test-stack")
@@ -227,14 +249,34 @@ class TestDockerActions:
             "name": "my-stack",
             "config_file": "/path/to/compose.yml",
         }
+        app.container_list.stack_manager = Mock()
+        app.container_list.stack_manager.stack_headers = {"my-stack": Mock()}
+        app.container_list.stack_manager.container_rows = {}  # Add container_rows mock
         app.docker.execute_stack_command.return_value = True
 
         app.execute_docker_command("down")
 
-        app.docker.execute_stack_command.assert_called_once_with(
-            "my-stack", "/path/to/compose.yml", "down"
+        # Check that set_stack_status was called instead of error_display
+        app.container_list.set_stack_status.assert_called_once_with(
+            "my-stack", "Taking down..."
         )
-        app.error_display.update.assert_called_with("Taking down stack: my-stack")
+        
+        # Check that set_stack_containers_status was called
+        app.container_list.set_stack_containers_status.assert_called_once_with(
+            "my-stack", "down"
+        )
+        
+        # Check that refresh was called to update the UI
+        app.refresh.assert_called_once()
+        
+        # Check that a timer was set to call action_refresh
+        assert len(app._timers) == 1
+        assert app._timers[0][0] == 2  # 2 second delay
+        assert app._timers[0][1] == app.action_refresh
+        
+        # The actual execute_stack_command is called in a background thread
+        mock_thread.assert_called_once()
+        mock_thread.return_value.start.assert_called_once()
 
     def test_execute_docker_command_stack_down_with_volumes(self):
         """Test execute_docker_command for stack down with volumes."""
@@ -331,7 +373,8 @@ class TestDockerActions:
         app.docker.remove_unused_volumes.assert_not_called()
         app.error_display.update.assert_called_with("No unused volumes found")
 
-    def test_execute_docker_command_stack_recreate(self):
+    @patch("threading.Thread")
+    def test_execute_docker_command_stack_recreate(self, mock_thread):
         """Test execute_docker_command for stack recreate."""
         app = MockDockTUIApp()
         app.container_list.selected_item = ("stack", "test-stack")
@@ -339,6 +382,9 @@ class TestDockerActions:
             "name": "my-stack",
             "config_file": "/path/to/compose.yml",
         }
+        app.container_list.stack_manager = Mock()
+        app.container_list.stack_manager.stack_headers = {"my-stack": Mock()}
+        app.container_list.stack_manager.container_rows = {}  # Add container_rows mock
         app.docker.execute_stack_command.return_value = True
 
         app.execute_docker_command("recreate")
@@ -347,9 +393,10 @@ class TestDockerActions:
         assert app._recreating_item_type == "stack"
         assert app._recreating_container_name == "my-stack"
 
-        app.docker.execute_stack_command.assert_called_once_with(
-            "my-stack", "/path/to/compose.yml", "recreate"
-        )
+        # The actual execute_stack_command is called in a background thread
+        # so we check that a thread was started
+        mock_thread.assert_called_once()
+        mock_thread.return_value.start.assert_called_once()
 
     def test_execute_docker_command_no_stack_data(self):
         """Test execute_docker_command with missing stack data."""
@@ -373,7 +420,8 @@ class TestDockerActions:
 
         app.error_display.update.assert_called_once_with("Unknown item type: unknown")
 
-    def test_execute_docker_command_failure(self):
+    @patch("threading.Thread")
+    def test_execute_docker_command_failure(self, mock_thread):
         """Test execute_docker_command when docker command fails."""
         app = MockDockTUIApp()
         app.container_list.selected_item = ("stack", "test-stack")
@@ -381,14 +429,24 @@ class TestDockerActions:
             "name": "my-stack",
             "config_file": "/path/to/compose.yml",
         }
+        app.container_list.stack_manager = Mock()
+        app.container_list.stack_manager.stack_headers = {"my-stack": Mock()}
+        app.container_list.stack_manager.container_rows = {}  # Add container_rows mock
+        app.container_list.stack_manager.container_rows = {}  # Add container_rows mock
         app.docker.execute_stack_command.return_value = False
         app.docker.last_error = "Permission denied"
 
         app.execute_docker_command("start")
 
-        app.error_display.update.assert_called_with(
-            "Error starting stack: Permission denied"
+        # Check that set_stack_status was called
+        app.container_list.set_stack_status.assert_called_once_with(
+            "my-stack", "Starting..."
         )
+        
+        # The actual error would be shown from the background thread
+        # Here we just verify that the thread was started
+        mock_thread.assert_called_once()
+        mock_thread.return_value.start.assert_called_once()
 
     def test_execute_docker_command_exception(self):
         """Test execute_docker_command with exception."""

@@ -54,6 +54,11 @@ class StackManager:
         # Track that this stack exists in the new data
         self._stacks_in_new_data.add(name)
 
+        # Get operation status from parent if available
+        operation_status = None
+        if hasattr(self.parent, "get_stack_status"):
+            operation_status = self.parent.get_stack_status(name)
+
         if name not in self.stack_tables:
             header = StackHeader(
                 name,
@@ -63,6 +68,7 @@ class StackManager:
                 total,
                 can_recreate,
                 has_compose_file,
+                operation_status,
             )
             table = self.parent.create_stack_table(name)
 
@@ -91,6 +97,21 @@ class StackManager:
         else:
             header = self.stack_headers[name]
             was_expanded = header.expanded
+            # Only preserve existing operation status if:
+            # 1. New status is None
+            # 2. Header has an existing status
+            # 3. The status is still in the parent's overrides (not cleared)
+            if operation_status is None and header.operation_status:
+                # Check if the status is still valid in the parent's overrides
+                if (
+                    hasattr(self.parent, "_stack_status_overrides")
+                    and isinstance(self.parent._stack_status_overrides, dict)
+                    and name in self.parent._stack_status_overrides
+                ):
+                    operation_status = header.operation_status
+                else:
+                    # Status was cleared, so don't preserve it
+                    operation_status = None
             header.running = running
             header.exited = exited
             header.total = total
@@ -98,6 +119,7 @@ class StackManager:
             header.can_recreate = can_recreate
             header.has_compose_file = has_compose_file
             header.expanded = was_expanded
+            header.operation_status = operation_status
             self.stack_tables[name].styles.display = "block" if was_expanded else "none"
             header._update_content()
 
@@ -137,11 +159,56 @@ class StackManager:
 
         # Check for status override
         status = container_data["status"]
+        actual_status = status.lower()
+
         if (
             hasattr(self.parent, "_status_overrides")
             and container_id in self.parent._status_overrides
         ):
-            status = self.parent._status_overrides[container_id]
+            override = self.parent._status_overrides[container_id]
+
+            # Get the time when this override was set
+            override_time = None
+            if hasattr(self.parent, "_status_override_times"):
+                override_time = self.parent._status_override_times.get(container_id)
+
+            # Only apply the override if it makes sense given the actual status
+            # For example, don't show "stopping..." if container is already exited
+            should_apply_override = False
+
+            if override == "stopping...":
+                # Only show "stopping..." if container is still running
+                should_apply_override = actual_status in ["running", "restarting"]
+            elif override == "starting...":
+                # Only show "starting..." if container is not yet running
+                should_apply_override = actual_status in [
+                    "exited",
+                    "stopped",
+                    "created",
+                    "paused",
+                ]
+            elif override in ["restarting...", "recreating..."]:
+                # For these operations, show the status for up to 10 seconds
+                # After that, assume the operation has completed
+                if override_time:
+                    import time
+
+                    elapsed = time.time() - override_time
+                    should_apply_override = elapsed < 10.0  # 10 second timeout
+                else:
+                    # If no timestamp, show for backwards compatibility
+                    should_apply_override = True
+
+            if should_apply_override:
+                status = override
+            else:
+                # Clear the override since it's no longer relevant
+                del self.parent._status_overrides[container_id]
+                if (
+                    hasattr(self.parent, "_status_override_times")
+                    and container_id in self.parent._status_override_times
+                ):
+                    del self.parent._status_override_times[container_id]
 
         row_data = (
             container_data["id"],
