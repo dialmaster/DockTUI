@@ -64,7 +64,7 @@ class FooterFormatter:
             return
 
         volume_data = self.container_list.selected_volume_data
-        selection_text = self._create_selection_header()
+        selection_text = Text()
         selection_text.append("  Volume: ", Style(color="white"))
         selection_text.append(
             f"{volume_data['name']}", Style(color="magenta", bold=True)
@@ -81,7 +81,7 @@ class FooterFormatter:
                 f"{volume_data['stack']}", Style(color="green", bold=True)
             )
         else:
-            selection_text.append("None", Style(color="dim", bold=True))
+            selection_text.append("None", Style(color="white", dim=True, bold=True))
         selection_text.append(" | ", Style(color="white"))
         selection_text.append("In Use: ", Style(color="white"))
         if volume_data.get("in_use", False):
@@ -111,7 +111,7 @@ class FooterFormatter:
             return
 
         image_data = self.container_list.selected_image_data
-        selection_text = self._create_selection_header()
+        selection_text = Text()
         selection_text.append("  Image: ", Style(color="white"))
         # Show first 12 chars of ID
         selection_text.append(
@@ -123,11 +123,30 @@ class FooterFormatter:
             selection_text.append(f"{tags_text}", Style(color="cyan", bold=True))
         else:
             selection_text.append("<none>", Style(color="blue", bold=True))
-        selection_text.append(" | ", Style(color="white"))
+        selection_text.append("\n")
         selection_text.append("Containers: ", Style(color="white"))
-        selection_text.append(
-            f"{image_data['containers']}", Style(color="green", bold=True)
-        )
+
+        # Display container names if available, otherwise fall back to count/string
+        if "container_names" in image_data and image_data["container_names"]:
+            container_names = image_data["container_names"]
+            containers_text = ", ".join(container_names)
+            # Truncate if too long
+            if len(containers_text) > 50:
+                containers_text = containers_text[:47] + "..."
+            selection_text.append(containers_text, Style(color="green", bold=True))
+        elif isinstance(image_data.get("containers"), int):
+            # If we have a count, show it
+            count = image_data["containers"]
+            if count > 0:
+                selection_text.append(f"{count}", Style(color="green", bold=True))
+            else:
+                selection_text.append("None", Style(color="white", dim=True, bold=True))
+        else:
+            # Fall back to whatever string we have
+            selection_text.append(
+                f"{image_data.get('containers', 'None')}",
+                Style(color="green", bold=True),
+            )
         status_bar.update(selection_text)
         # SelectionChanged is posted by the image manager
 
@@ -137,7 +156,7 @@ class FooterFormatter:
             return
 
         network_data = self.container_list.selected_network_data
-        selection_text = self._create_selection_header()
+        selection_text = Text()
         selection_text.append("  Network: ", Style(color="white"))
         selection_text.append(f"{network_data['name']}", Style(color="cyan", bold=True))
         selection_text.append(" | ", Style(color="white"))
@@ -165,7 +184,7 @@ class FooterFormatter:
             return
 
         stack_data = self.container_list.selected_stack_data
-        selection_text = self._create_selection_header()
+        selection_text = Text()
         selection_text.append("  Stack: ", Style(color="white"))
         selection_text.append(f"{stack_data['name']}", Style(color="white", bold=True))
         selection_text.append(" | ", Style(color="white"))
@@ -190,7 +209,9 @@ class FooterFormatter:
             return
 
         container_data = self.container_list.selected_container_data
-        selection_text = self._create_selection_header()
+        selection_text = Text()
+
+        # First line
         selection_text.append("  Container: ", Style(color="white"))
         selection_text.append(
             f"{container_data['name']}", Style(color="white", bold=True)
@@ -224,6 +245,24 @@ class FooterFormatter:
                 f"{container_data['memory']}", Style(color="magenta", bold=True)
             )
 
+        # Add second line with image information
+        if "image_id" in container_data or "image_name" in container_data:
+            selection_text.append("\n  Container Image: ", Style(color="white"))
+
+            # Add image ID if available
+            if "image_id" in container_data and container_data["image_id"]:
+                selection_text.append(
+                    f"{container_data['image_id']}", Style(color="yellow", bold=True)
+                )
+
+            # Add image name if available
+            if "image_name" in container_data and container_data["image_name"]:
+                if "image_id" in container_data and container_data["image_id"]:
+                    selection_text.append(" - ", Style(color="white"))
+                selection_text.append(
+                    f"{container_data['image_name']}", Style(color="cyan", bold=True)
+                )
+
         status_bar.update(selection_text)
         # SelectionChanged is posted by the stack manager
 
@@ -238,9 +277,3 @@ class FooterFormatter:
         )
         status_bar.update(invalid_selection_text)
         # Don't post SelectionChanged for invalid selections
-
-    def _create_selection_header(self) -> Text:
-        """Create the selection header text."""
-        selection_text = Text()
-        selection_text.append("Selection:", Style(color="black", bgcolor="yellow"))
-        return selection_text

@@ -28,6 +28,8 @@ class StackManager:
         self.expanded_stacks = set()
         self._stacks_in_new_data = set()
         self.selected_stack_data: Optional[Dict] = None
+        # Cache full container data for each container ID
+        self._container_data_cache: Dict[str, Dict] = {}
         self.selected_container_data: Optional[Dict] = None
 
     def add_stack(
@@ -221,6 +223,9 @@ class StackManager:
             container_data["ports"],
         )
 
+        # Cache the full container data
+        self._container_data_cache[container_id] = container_data
+
         # Update selected container data if this is the selected container
         if (
             self.parent.selected_item
@@ -391,18 +396,24 @@ class StackManager:
             stack_name, row_idx = self.container_rows[container_id]
             table = self.stack_tables[stack_name]
 
-            # Get container data from the table
-            container_data = {
-                "id": table.get_cell_at((row_idx, 0)),
-                "name": table.get_cell_at((row_idx, 1)),
-                "status": table.get_cell_at((row_idx, 2)),
-                "uptime": table.get_cell_at((row_idx, 3)),
-                "cpu": table.get_cell_at((row_idx, 4)),
-                "memory": table.get_cell_at((row_idx, 5)),
-                "pids": table.get_cell_at((row_idx, 6)),
-                "ports": table.get_cell_at((row_idx, 7)),
-                "stack": stack_name,
-            }
+            # Use cached full container data if available
+            if container_id in self._container_data_cache:
+                container_data = self._container_data_cache[container_id].copy()
+                # Ensure stack name is included
+                container_data["stack"] = stack_name
+            else:
+                # Fallback to getting data from the table
+                container_data = {
+                    "id": table.get_cell_at((row_idx, 0)),
+                    "name": table.get_cell_at((row_idx, 1)),
+                    "status": table.get_cell_at((row_idx, 2)),
+                    "uptime": table.get_cell_at((row_idx, 3)),
+                    "cpu": table.get_cell_at((row_idx, 4)),
+                    "memory": table.get_cell_at((row_idx, 5)),
+                    "pids": table.get_cell_at((row_idx, 6)),
+                    "ports": table.get_cell_at((row_idx, 7)),
+                    "stack": stack_name,
+                }
 
             self.selected_container_data = container_data
             self.parent.selected_container_data = container_data

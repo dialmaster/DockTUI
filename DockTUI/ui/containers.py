@@ -437,6 +437,7 @@ class ContainerList(ContainerListBase):
         """
         self.image_manager.select_image(image_id)
         # Manager handles selection data updates
+        self.selected_image_data = self.image_manager.selected_image_data
 
     def select_volume(self, volume_name: str) -> None:
         """Select a volume and update the footer.

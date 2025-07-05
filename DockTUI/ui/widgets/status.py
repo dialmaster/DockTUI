@@ -37,11 +37,12 @@ class ErrorDisplay(Static):
 class StatusBar(Static):
     """A widget that displays the current selection status at the bottom of the screen."""
 
+    # Note that the bottom 2 rows of the StatusBar are hidden by the Footer widget
     DEFAULT_CSS = """
     StatusBar {
         background: $panel;
         color: $text-primary;
-        height: 3;
+        height: 4;
         dock: bottom;
         padding-top: 0;
         margin-top: 0;
