@@ -34,6 +34,8 @@ class ImageManager:
         self._preserve_selected_image_id: Optional[str] = (
             None  # Image ID to preserve during refresh
         )
+        # Store full image data for each image ID
+        self._image_data_cache: Dict[str, Dict] = {}
 
         # For compatibility with existing structure
         self.image_headers = {}  # Empty dict for compatibility
@@ -234,12 +236,16 @@ class ImageManager:
                 f"Added image {image_id} - total rows: {self.images_table.row_count}"
             )
 
+        # Store the full image data in cache
+        self._image_data_cache[image_id] = image_data
+
         # Update selected image data if this is the selected image
         if (
             self.parent.selected_item
             and self.parent.selected_item[0] == "image"
             and self.parent.selected_item[1] == image_id
         ):
+            # Use the full image data with container names
             self.selected_image_data = image_data
 
     def mark_image_as_removed(self, image_id: str) -> None:
@@ -283,6 +289,9 @@ class ImageManager:
 
             # Remove from removed images set if present
             self._removed_images.discard(image_id)
+
+            # Remove from data cache
+            self._image_data_cache.pop(image_id, None)
 
             # Rebuild the index mapping
             self.image_rows.clear()
@@ -339,32 +348,43 @@ class ImageManager:
             self.parent.selected_network_data = None
             self.parent.selected_volume_data = None
 
-            # Store basic image data from the table
-            if image_id in self.image_rows and self.images_table:
-                row_index = self.image_rows[image_id]
-                # Extract data from the table row
-                self.selected_image_data = {
-                    "id": image_id,
-                    "repository": str(self.images_table.get_cell_at((row_index, 0))),
-                    "tag": str(self.images_table.get_cell_at((row_index, 1))),
-                    "containers": str(self.images_table.get_cell_at((row_index, 3))),
-                    "created": str(self.images_table.get_cell_at((row_index, 4))),
-                    "size": str(self.images_table.get_cell_at((row_index, 5))),
-                    "status": str(self.images_table.get_cell_at((row_index, 6))),
-                    "tags": [],  # Will be populated from repository:tag
-                }
-                # Build tags list from repository and tag
-                repo = self.selected_image_data["repository"]
-                tag = self.selected_image_data["tag"]
-                if repo != "<none>" and tag != "<none>":
-                    self.selected_image_data["tags"] = [f"{repo}:{tag}"]
-                # Also update parent's reference
-                self.parent.selected_image_data = self.selected_image_data
+            # Use cached full image data if available
+            if image_id in self._image_data_cache:
+                self.selected_image_data = self._image_data_cache[image_id]
+            else:
+                # Fallback to extracting from table if cache miss
+                if image_id in self.image_rows and self.images_table:
+                    row_index = self.image_rows[image_id]
+                    # Extract data from the table row
+                    self.selected_image_data = {
+                        "id": image_id,
+                        "repository": str(
+                            self.images_table.get_cell_at((row_index, 0))
+                        ),
+                        "tag": str(self.images_table.get_cell_at((row_index, 1))),
+                        "containers": str(
+                            self.images_table.get_cell_at((row_index, 3))
+                        ),
+                        "created": str(self.images_table.get_cell_at((row_index, 4))),
+                        "size": str(self.images_table.get_cell_at((row_index, 5))),
+                        "status": str(self.images_table.get_cell_at((row_index, 6))),
+                        "tags": [],  # Will be populated from repository:tag
+                    }
+                    # Build tags list from repository and tag
+                    repo = self.selected_image_data["repository"]
+                    tag = self.selected_image_data["tag"]
+                    if repo != "<none>" and tag != "<none>":
+                        self.selected_image_data["tags"] = [f"{repo}:{tag}"]
+            # Also update parent's reference
+            self.parent.selected_image_data = self.selected_image_data
 
             # Focus the table row
             if self.images_table:
                 row_index = self.image_rows[image_id]
                 self.images_table.move_cursor(row=row_index)
+
+            # Update the footer with selection
+            self.parent._update_footer_with_selection()
 
             # Post selection changed event
             if self.selected_image_data:
@@ -398,6 +418,7 @@ class ImageManager:
                     break
 
             if not image_id:
+                logger.warning(f"Could not find image_id for row_index {row_index}")
                 return False
 
             # Use the parent's select_image method which handles everything properly
@@ -474,8 +495,9 @@ class ImageManager:
     def sort_images_table(self) -> None:
         """Sort the images table:
         1) Status (Active, Stopped, Unused)
-        2) Created (newest → oldest)
-        3) Image ID (lexicographic)
+        2) Image Repository Name
+        3) Created (newest → oldest)
+        4) Image ID (lexicographic)
         """
         if not self.images_table or self.images_table.row_count == 0:
             return
@@ -513,6 +535,7 @@ class ImageManager:
 
         def sort_key(item):
             image_id, cells = item
+            repository = cells[0]  # Repository is the first column
             status = cells[6]
             created = cells[4]
 
@@ -520,8 +543,13 @@ class ImageManager:
                 0 if status == "Active" else 1 if status == "Stopped" else 2  # Unused
             )
 
+            # Sort <none> repositories to the bottom within each status group
+            repo_sort_key = (
+                (1, "") if repository == "<none>" else (0, repository.lower())
+            )
+
             # Negative timestamp → newest first
-            return (status_order, -_created_ts(created), image_id)
+            return (status_order, repo_sort_key, -_created_ts(created), image_id)
 
         rows_data.sort(key=sort_key)
 

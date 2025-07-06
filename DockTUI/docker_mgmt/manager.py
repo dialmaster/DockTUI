@@ -332,6 +332,24 @@ class DockerManager:
                                 f"Could not get start time for container {container.name}: {e}"
                             )
 
+                        # Get image information
+                        raw_image_id = (
+                            container.attrs.get("Image", "")
+                            if hasattr(container, "attrs") and container.attrs
+                            else ""
+                        )
+                        # Remove sha256: prefix if present and get first 12 characters
+                        image_id = (
+                            raw_image_id.replace("sha256:", "")[:12]
+                            if raw_image_id
+                            else ""
+                        )
+                        image_name = (
+                            container.attrs.get("Config", {}).get("Image", "")
+                            if hasattr(container, "attrs") and container.attrs
+                            else ""
+                        )
+
                         container_info = {
                             "id": container.short_id,
                             "name": container.name,
@@ -342,6 +360,8 @@ class DockerManager:
                             "pids": stats["pids"],
                             "stack": stack_name,
                             "ports": self._format_ports(container),
+                            "image_id": image_id,
+                            "image_name": image_name,
                         }
                         containers.append(container_info)
                     except Exception as container_error:
