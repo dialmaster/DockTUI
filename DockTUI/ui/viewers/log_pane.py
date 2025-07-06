@@ -320,19 +320,22 @@ class LogPane(Vertical):
         if self.queue_timer:
             self.queue_timer.stop()
 
-    def update_selection(self, item_type: str, item_id: str, item_data: dict):
+    def update_selection(
+        self, item_type: str, item_id: str, item_data: dict, force_restart: bool = False
+    ):
         """Update the log pane with a new selection.
 
         Args:
             item_type: Type of item ("container" or "stack")
             item_id: ID of the item
             item_data: Dictionary containing item information
+            force_restart: Force restart of log streaming even if same item is selected
         """
         # Save dropdown states before any UI updates
         dropdown_states = self._save_dropdown_states()
 
         # Check if this is the same item that's already selected
-        if self.current_item == (item_type, item_id):
+        if self.current_item == (item_type, item_id) and not force_restart:
             # If it's the same container, check if status changed
             if item_type == "container" and self.current_item_data:
                 old_status = self.current_item_data.get("status", "").lower()

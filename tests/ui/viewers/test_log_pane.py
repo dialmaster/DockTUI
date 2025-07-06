@@ -521,3 +521,91 @@ class TestLogPane:
         call_args = log_pane.call_after_refresh.call_args[0]
         assert call_args[0] == log_pane._restore_dropdown_states
         assert call_args[1] == {"since_expanded": True}
+
+    def test_update_selection_force_restart_true(self, log_pane):
+        """Test that update_selection with force_restart=True restarts logs even for same selection."""
+        # Set up current selection
+        log_pane.current_item = ("container", "test_id")
+        log_pane.current_item_data = {"name": "test", "status": "running"}
+        
+        # Mock dependencies
+        log_pane._save_dropdown_states = Mock(return_value={})
+        log_pane._restore_dropdown_states = Mock()
+        log_pane.call_after_refresh = Mock()
+        log_pane._update_header_for_item = Mock(return_value=True)
+        log_pane._show_logs_ui = Mock()
+        log_pane._clear_logs = Mock()
+        log_pane._start_logs = Mock()
+        log_pane.log_filter = Mock()
+        log_pane.log_filter.has_filter = Mock(return_value=False)
+        
+        # Call update_selection with same item but force_restart=True
+        log_pane.update_selection("container", "test_id", {"name": "test", "status": "running"}, force_restart=True)
+        
+        # Should NOT return early - should restart logs
+        log_pane._update_header_for_item.assert_called_once()
+        log_pane._show_logs_ui.assert_called_once()
+        log_pane._clear_logs.assert_called_once()
+        log_pane._start_logs.assert_called_once()
+        
+        # Should still save/restore dropdown states
+        log_pane._save_dropdown_states.assert_called_once()
+        assert log_pane.call_after_refresh.called
+
+    def test_update_selection_force_restart_false_same_item(self, log_pane):
+        """Test that update_selection with force_restart=False (default) returns early for same selection."""
+        # Set up current selection
+        log_pane.current_item = ("container", "test_id")
+        log_pane.current_item_data = {"name": "test", "status": "running"}
+        
+        # Mock dependencies
+        log_pane._save_dropdown_states = Mock(return_value={})
+        log_pane._restore_dropdown_states = Mock()
+        log_pane.call_after_refresh = Mock()
+        log_pane._update_header_for_item = Mock(return_value=True)
+        log_pane._show_logs_ui = Mock()
+        log_pane._clear_logs = Mock()
+        log_pane._start_logs = Mock()
+        
+        # Call update_selection with same item and force_restart=False (default)
+        log_pane.update_selection("container", "test_id", {"name": "test", "status": "running"})
+        
+        # Should return early - not restart logs
+        log_pane._update_header_for_item.assert_not_called()
+        log_pane._show_logs_ui.assert_not_called()
+        log_pane._clear_logs.assert_not_called()
+        log_pane._start_logs.assert_not_called()
+        
+        # Should still save/restore dropdown states
+        log_pane._save_dropdown_states.assert_called_once()
+        assert log_pane.call_after_refresh.called
+
+    def test_update_selection_different_item_ignores_force_restart(self, log_pane):
+        """Test that update_selection always restarts logs for different items regardless of force_restart."""
+        # Set up current selection
+        log_pane.current_item = ("container", "old_id")
+        log_pane.current_item_data = {"name": "old_container", "status": "running"}
+        
+        # Mock dependencies
+        log_pane._save_dropdown_states = Mock(return_value={})
+        log_pane._restore_dropdown_states = Mock()
+        log_pane.call_after_refresh = Mock()
+        log_pane._update_header_for_item = Mock(return_value=True)
+        log_pane._show_logs_ui = Mock()
+        log_pane._clear_logs = Mock()
+        log_pane._start_logs = Mock()
+        log_pane.log_filter = Mock()
+        log_pane.log_filter.has_filter = Mock(return_value=False)
+        
+        # Call update_selection with different item and force_restart=False
+        log_pane.update_selection("container", "new_id", {"name": "new_container", "status": "running"}, force_restart=False)
+        
+        # Should restart logs for different item
+        log_pane._update_header_for_item.assert_called_once()
+        log_pane._show_logs_ui.assert_called_once()
+        log_pane._clear_logs.assert_called_once()
+        log_pane._start_logs.assert_called_once()
+        
+        # Current item should be updated
+        assert log_pane.current_item == ("container", "new_id")
+        assert log_pane.current_item_data == {"name": "new_container", "status": "running"}
