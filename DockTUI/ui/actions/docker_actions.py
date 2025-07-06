@@ -279,8 +279,12 @@ class DockerActions:
                 self.container_list.select_container(new_container_id)
                 # Explicitly update the log pane with the new container data
                 # This ensures the log pane gets the updated container info immediately
+                # Use force_restart=True to ensure logs are restarted for the recreated container
                 self.log_pane.update_selection(
-                    "container", new_container_id, new_container_data
+                    "container",
+                    new_container_id,
+                    new_container_data,
+                    force_restart=True,
                 )
 
         elif self._recreating_item_type == "stack":

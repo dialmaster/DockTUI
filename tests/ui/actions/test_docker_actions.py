@@ -480,7 +480,7 @@ class TestDockerActions:
         # Verify UI updates
         app.container_list.select_container.assert_called_once_with("new-id-123")
         app.log_pane.update_selection.assert_called_once_with(
-            "container", "new-id-123", {"id": "new-id-123", "name": "my-container"}
+            "container", "new-id-123", {"id": "new-id-123", "name": "my-container"}, force_restart=True
         )
 
         # Verify tracking variables cleared
