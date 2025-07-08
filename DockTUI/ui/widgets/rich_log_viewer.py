@@ -173,6 +173,12 @@ class RichLogViewer(ScrollView):
         self.virtual_scroll_manager.invalidate_virtual_size_immediate()
         # Trigger immediate refresh
         _ = self.virtual_size
+        # Multiple approaches to force scrollbar update (Textual issue)
+        # 1. Force scroll position update
+        current_y = self.scroll_offset.y
+        self.scroll_to(y=current_y, animate=False, force=True)
+        # 2. Refresh with layout flag
+        self.refresh(layout=True)
 
     def _schedule_parse(self, log_line: LogLine, priority: bool = False):
         """Schedule a log line for background parsing.
@@ -185,6 +191,29 @@ class RichLogViewer(ScrollView):
 
     def render_line(self, y: int) -> Strip:
         """Render a single line of the log viewer."""
+        # Show "no matches" message if we have a filter but no visible lines
+        if self.current_filter and not self.visible_lines:
+            if y == 0:
+                from rich.style import Style
+                from rich.text import Text
+
+                message = Text(
+                    "No log lines match filter",
+                    style=Style(color="yellow", italic=True),
+                )
+                # Pad the message to fill the entire width
+                message_str = message.plain
+                if len(message_str) < self.size.width:
+                    message = Text(
+                        message_str.ljust(self.size.width),
+                        style=Style(color="yellow", italic=True),
+                    )
+                segments = list(message.render(self.app.console))
+                return Strip(segments, self.size.width)
+            else:
+                # Return blank lines for all other positions
+                return Strip.blank(self.size.width)
+
         # Account for scroll position
         virtual_y = y + int(self.scroll_offset.y)
 
@@ -303,14 +332,19 @@ class RichLogViewer(ScrollView):
                     self._invalidate_virtual_size()
 
         # Force refresh to update virtual size before scrolling
-        self.refresh()
+        self.refresh(layout=True)
 
         # Auto-scroll if enabled - use call_after_refresh to ensure size is updated
         if self.auto_follow:
             self.call_after_refresh(self.scroll_end)
 
-    def add_log_lines(self, lines: List[str]) -> None:
-        """Add multiple log lines efficiently."""
+    def add_log_lines(self, lines: List[str], unfiltered: bool = False) -> None:
+        """Add multiple log lines efficiently.
+
+        Args:
+            lines: List of log line strings to add
+            unfiltered: If True, lines are already filtered and should all be added to visible_lines
+        """
         if not lines:
             return
 
@@ -339,7 +373,8 @@ class RichLogViewer(ScrollView):
                 start_line_number = len(self.log_lines)
 
             # Process in smaller batches for better UI feedback
-            BATCH_SIZE = 20  # Update UI every 20 lines for better scrollbar feedback
+            # Use larger batches for filtered operations to reduce overhead
+            BATCH_SIZE = 100 if unfiltered else 20
 
             for batch_start in range(0, len(lines_to_add), BATCH_SIZE):
                 batch_end = min(batch_start + BATCH_SIZE, len(lines_to_add))
@@ -364,24 +399,42 @@ class RichLogViewer(ScrollView):
                 for line in new_log_lines:
                     self._schedule_parse(line)
 
-                # If we need to refilter (because old lines were removed), do it
-                if start_line_number == 0:
-                    # Refilter all visible lines
-                    self.visible_lines = [
-                        line for line in self.log_lines if self._should_show_line(line)
-                    ]
+                # Handle visibility based on whether lines are pre-filtered
+                if unfiltered:
+                    # Lines are already filtered, add all of them to visible_lines
+                    if start_line_number == 0:
+                        # Replace all visible lines with new ones
+                        self.visible_lines = new_log_lines.copy()
+                    else:
+                        # Just add new lines
+                        self.visible_lines.extend(new_log_lines)
                 else:
-                    # Just add new visible lines
-                    new_visible = [
-                        line for line in new_log_lines if self._should_show_line(line)
-                    ]
-                    if new_visible:
-                        self.visible_lines.extend(new_visible)
+                    # Need to filter lines
+                    if start_line_number == 0:
+                        # Refilter all visible lines
+                        self.visible_lines = [
+                            line
+                            for line in self.log_lines
+                            if self._should_show_line(line)
+                        ]
+                    else:
+                        # Just add new visible lines
+                        new_visible = [
+                            line
+                            for line in new_log_lines
+                            if self._should_show_line(line)
+                        ]
+                        if new_visible:
+                            self.visible_lines.extend(new_visible)
 
-                self._invalidate_virtual_size()
+                # Use immediate invalidation for filter operations
+                if unfiltered:
+                    self._invalidate_virtual_size_immediate()
+                else:
+                    self._invalidate_virtual_size()
 
         # Force refresh to update scrollbar immediately
-        self.refresh()
+        self.refresh(layout=True)
 
         # Final auto-scroll if enabled
         if self.auto_follow and lines_to_add:
@@ -395,7 +448,7 @@ class RichLogViewer(ScrollView):
             self._line_cache.clear()
             self._invalidate_virtual_size_immediate()  # Use immediate for user action
             self.selection_manager.clear_selection()
-        self.refresh()
+        self.refresh(layout=True)
 
     def on_unmount(self) -> None:
         """Clean up when widget is unmounted."""
@@ -406,20 +459,76 @@ class RichLogViewer(ScrollView):
         self._parsing_coordinator.stop()
 
     def set_filter(self, filter_text: str) -> None:
-        """Apply a filter to log lines."""
+        """Update the current filter text without re-filtering.
+
+        Note: This method now only updates the filter text. Actual filtering
+        should be done before calling add_log_lines() with unfiltered=True.
+        """
         with self._lock:
             self.current_filter = filter_text.lower()
 
-            # Refilter all lines
+    def refilter_existing_lines(self) -> None:
+        """Refilter the existing log lines based on current filter."""
+        with self._lock:
+            # Refilter all existing lines
             if self.current_filter:
-                self.visible_lines = [
-                    line for line in self.log_lines if self._should_show_line(line)
-                ]
+                # Find all marker positions first
+                marker_positions = []
+                for i, line in enumerate(self.log_lines):
+                    if line.is_marked:
+                        marker_positions.append(i)
+
+                # Filter lines with marker context
+                self.visible_lines = []
+                for i, line in enumerate(self.log_lines):
+                    should_show = False
+
+                    # Always show marked lines
+                    if line.is_marked:
+                        should_show = True
+                    # Always show system messages
+                    elif line.is_system_message:
+                        should_show = True
+                    # Check if matches filter
+                    elif self.current_filter in line.raw_text.lower():
+                        should_show = True
+                    else:
+                        # Check if within 2 lines of a marker
+                        for marker_idx in marker_positions:
+                            if abs(i - marker_idx) <= 2:
+                                should_show = True
+                                break
+
+                    if should_show:
+                        self.visible_lines.append(line)
             else:
+                # No filter - show all lines
                 self.visible_lines = self.log_lines.copy()
 
-            self._invalidate_virtual_size()
-        self.refresh()
+            self._invalidate_virtual_size_immediate()
+
+        # Workaround for Textual scrollbar update delay (GitHub issues #5631, #5632)
+        # Force scrollbar to update immediately using multiple techniques
+
+        # First, do an immediate refresh with layout
+        self.refresh(layout=True)
+
+        # Then schedule additional updates after refresh
+        def force_scrollbar_update():
+            # Access virtual size to ensure it's calculated
+            _ = self.virtual_size
+            # Slightly modify scroll position to force full recalculation
+            current_y = self.scroll_offset.y
+            # Move by 1 pixel then back - forces scrollbar update
+            self.scroll_to(x=0, y=current_y + 1, animate=False, force=True)
+            self.scroll_to(x=0, y=current_y, animate=False, force=True)
+            # Final refresh
+            self.refresh()
+
+        # Use multiple call_after_refresh for aggressive update
+        self.call_after_refresh(force_scrollbar_update)
+        # Second call to ensure it happens
+        self.call_after_refresh(lambda: self.refresh(layout=True))
 
     def _should_show_line(self, log_line: LogLine) -> bool:
         """Check if a line should be shown based on current filter."""

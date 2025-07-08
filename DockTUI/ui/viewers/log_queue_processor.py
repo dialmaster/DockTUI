@@ -132,11 +132,10 @@ class LogQueueProcessor:
                 matched_lines += 1
                 self._clear_status_messages_if_needed()
 
-                # If we have a matching line and were showing "no matches", clear it
+                # If we have a matching line and were showing "no matches", clear the flag
                 if self.log_stream_manager.showing_no_matches_message:
                     self.log_stream_manager.showing_no_matches_message = False
-                    # Clear the "no matches" message
-                    self._clear_log_display()
+                    # Don't clear the display! The logs are still there
 
                 # Collect lines for batch processing
                 if isinstance(self.log_display, RichLogViewer):
@@ -211,10 +210,9 @@ class LogQueueProcessor:
                 if self.log_filter_manager.should_show_line(line)
             )
 
-            # If no lines match the filter, show the message
+            # If no lines match the filter, set the flag
             if total_matches == 0:
-                self._clear_log_display()
-                self._set_log_text("No log lines match filter")
+                # Don't clear logs! Just set the flag
                 self.log_stream_manager.showing_no_matches_message = True
             else:
                 # We have matches, clear the flag

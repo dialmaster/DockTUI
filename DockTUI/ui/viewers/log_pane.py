@@ -324,9 +324,6 @@ class LogPane(Vertical):
 
     def _refilter_logs(self):
         """Re-filter and display all stored log lines based on current search filter."""
-        # Clear the display and re-add all lines that should be shown
-        self.log_display.clear()
-
         # Clear the "no matches" flag as we're re-evaluating
         self.log_stream_manager.showing_no_matches_message = False
 
@@ -334,9 +331,6 @@ class LogPane(Vertical):
         if self.log_stream_manager.showing_no_logs_message:
             # Container has no logs - always show this message regardless of filter
             self._set_log_text(self.log_queue_processor._get_no_logs_message())
-            # Still update the filter so it's ready when logs arrive
-            current_filter = self.log_filter_manager.get_current_filter()
-            self.log_display.set_filter(current_filter)
             return
 
         # Check if we have any logs at all
@@ -348,24 +342,23 @@ class LogPane(Vertical):
             self.log_stream_manager.showing_no_logs_message = True
             return
 
-        # Get filtered lines from the filter manager
-        filtered_lines = self.log_filter_manager.get_filtered_lines_for_display()
-
-        # Check what to display based on filter state and matches
-        if filtered_lines and isinstance(self.log_display, RichLogViewer):
-            # We have matching lines - display them
-            self.log_display.add_log_lines(filtered_lines)
-        elif self.log_filter_manager.has_filter():
-            # We have a filter but no matches
-            self._set_log_text("No log lines match filter")
-            self.log_stream_manager.showing_no_matches_message = True
-        else:
-            # No filter and no lines to display (shouldn't happen but handle it)
-            self._set_log_text(self.log_queue_processor._get_no_logs_message())
-
-        # Also update RichLogViewer's internal filter for proper display
+        # Update the filter text in RichLogViewer
         current_filter = self.log_filter_manager.get_current_filter()
-        self.log_display.set_filter(current_filter)
+        if isinstance(self.log_display, RichLogViewer):
+            self.log_display.set_filter(current_filter)
+
+            # Use the new refilter method that preserves LogLine objects
+            self.log_display.refilter_existing_lines()
+
+            # Check if we have any visible lines after filtering
+            if (
+                not self.log_display.visible_lines
+                and self.log_filter_manager.has_filter()
+            ):
+                # We have a filter but no matches
+                self.log_stream_manager.showing_no_matches_message = True
+                # Don't clear logs! The logs are still there, just filtered out
+                # The RichLogViewer will show an empty view, which is what we want
 
     def _on_marker_added(self, marker_lines: list):
         """Handle marker lines being added by the filter manager."""
