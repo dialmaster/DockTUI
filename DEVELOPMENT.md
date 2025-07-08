@@ -92,7 +92,7 @@ DockTUI/
 
 ### Prerequisites
 
-- Python 3.8 or higher
+- Python 3.12 or higher
 - Docker Engine installed and running
 - Poetry (Python package manager)
 
@@ -243,7 +243,7 @@ Actions dynamically enable/disable based on selection:
 
 GitHub Actions automatically runs on all pull requests and pushes to main:
 
-- Tests on Python 3.8 (minimum supported version)
+- Tests on Python 3.12 (minimum supported version)
 - Code formatting checks (black and isort)
 - Unit test execution
 - Coverage reporting with detailed PR comments

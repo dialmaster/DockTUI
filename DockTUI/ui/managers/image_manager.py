@@ -43,6 +43,16 @@ class ImageManager:
 
     def reset_tracking(self) -> None:
         """Reset tracking for new data update."""
+        # Save selection state before clearing
+        if self.images_table and self.images_table.has_class("has-selection"):
+            # Get the selected image from parent's selected_item
+            if self.parent.selected_item and self.parent.selected_item[0] == "image":
+                self._pending_selection = self.parent.selected_item[1]
+            else:
+                self._pending_selection = None
+        else:
+            self._pending_selection = None
+
         self._images_in_new_data.clear()
 
     def show_loading_message(self) -> None:
@@ -89,7 +99,8 @@ class ImageManager:
             self.hide_loading_message()
             # Create the images table with fixed rows to prevent scrolling
             self.images_table = DataTable(
-                show_cursor=True,
+                show_cursor=True,  # Let CSS control cursor visibility
+                cursor_type="row",
                 cursor_foreground_priority=True,
                 zebra_stripes=True,
                 fixed_rows=0,  # This might help with scrolling behavior
@@ -231,10 +242,21 @@ class ImageManager:
             # Add new row
             self.images_table.add_row(*row_data, key=image_id)
             # Store the row index (it's the last row added)
-            self.image_rows[image_id] = self.images_table.row_count - 1
+            row_index = self.images_table.row_count - 1
+            self.image_rows[image_id] = row_index
             logger.debug(
                 f"Added image {image_id} - total rows: {self.images_table.row_count}"
             )
+
+            # Check if this was the previously selected image
+            if (
+                hasattr(self, "_pending_selection")
+                and self._pending_selection == image_id
+            ):
+                # Restore the selection
+                self.images_table.add_class("has-selection")
+                self.images_table.move_cursor(row=row_index)
+                self._pending_selection = None
 
         # Store the full image data in cache
         self._image_data_cache[image_id] = image_data
@@ -341,6 +363,13 @@ class ImageManager:
             image_id: ID of the image to select
         """
         if image_id in self.image_rows:
+            # Clear all selections using the shared method
+            self.parent.clear_all_selections()
+
+            # Add 'has-selection' class to the images table
+            if self.images_table:
+                self.images_table.add_class("has-selection")
+
             # Clear any previous selection
             self.parent.selected_item = ("image", image_id)
             self.parent.selected_container_data = None
@@ -381,6 +410,7 @@ class ImageManager:
             # Focus the table row
             if self.images_table:
                 row_index = self.image_rows[image_id]
+                # CSS now controls cursor visibility through has-selection class
                 self.images_table.move_cursor(row=row_index)
 
             # Update the footer with selection
@@ -553,12 +583,27 @@ class ImageManager:
 
         rows_data.sort(key=sort_key)
 
+        # Save current selection state before clearing
+        selected_image_id = None
+        has_selection = self.images_table.has_class("has-selection")
+        if (
+            has_selection
+            and self.parent.selected_item
+            and self.parent.selected_item[0] == "image"
+        ):
+            selected_image_id = self.parent.selected_item[1]
+
         # Rebuild table
         self.images_table.clear(columns=False)
         self.image_rows.clear()
         for idx, (image_id, cells) in enumerate(rows_data):
             self.images_table.add_row(*cells, key=image_id)
             self.image_rows[image_id] = idx
+
+        # Restore selection if there was one
+        if selected_image_id and selected_image_id in self.image_rows:
+            self.images_table.add_class("has-selection")
+            self.images_table.move_cursor(row=self.image_rows[selected_image_id])
 
     def ensure_sorted(self) -> None:
         """Ensure the images table is sorted after all updates."""

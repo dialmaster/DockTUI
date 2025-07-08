@@ -12,7 +12,11 @@ logger = logging.getLogger("DockTUI.config")
 # Default configuration values
 DEFAULT_CONFIG = {
     "app": {"refresh_interval": 5.0},
-    "log": {"max_lines": 2000, "tail": 200, "since": "15m"},
+    "log": {
+        "max_lines": 2000,
+        "tail": 200,
+        "since": "15m",
+    },
 }
 
 

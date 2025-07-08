@@ -161,3 +161,11 @@ class LogFilter:
             True if a filter is set, False otherwise
         """
         return bool(self.search_filter)
+
+    def get_all_lines(self) -> List[str]:
+        """Get all stored log lines.
+
+        Returns:
+            List of all stored log lines
+        """
+        return list(self.all_log_lines)

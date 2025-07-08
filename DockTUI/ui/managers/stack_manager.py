@@ -240,8 +240,21 @@ class StackManager:
             if self.parent._is_updating:
                 # Add as a new row
                 row_key = table.row_count
-                table.add_row(*row_data)
+                table.add_row(*row_data, key=container_id)
                 self.container_rows[container_id] = (stack_name, row_key)
+
+                # Check if this was the previously selected row
+                if hasattr(self, "_pending_selection") and self._pending_selection:
+                    pending_stack, pending_container_id = self._pending_selection
+                    if (
+                        pending_stack == stack_name
+                        and pending_container_id == container_id
+                    ):
+                        # Restore the selection
+                        table.add_class("has-selection")
+                        table._selected_row_key = container_id
+                        table.move_cursor(row=row_key)
+                        delattr(self, "_pending_selection")
             else:
                 # For individual updates outside of a batch update cycle,
                 # check if this container already exists in the table
@@ -270,7 +283,7 @@ class StackManager:
 
                         # Add to the new stack
                         row_key = table.row_count
-                        table.add_row(*row_data)
+                        table.add_row(*row_data, key=container_id)
                         self.container_rows[container_id] = (stack_name, row_key)
                     else:
                         # Update the existing row in the same stack
@@ -351,6 +364,12 @@ class StackManager:
             stack_name: Name of the stack to select
         """
         if stack_name in self.stack_headers:
+            # Clear all selections using the shared method
+            self.parent.clear_all_selections()
+
+            # Add 'selected' class to the selected stack header
+            self.stack_headers[stack_name].add_class("selected")
+
             # Clear any previous selection
             self.parent.selected_item = ("stack", stack_name)
             self.parent.selected_container_data = None
@@ -385,7 +404,11 @@ class StackManager:
         Args:
             container_id: ID of the container to select
         """
+        logger.debug(f"select_container called with container_id: {container_id}")
         if container_id in self.container_rows:
+            # Clear all selections using the shared method
+            self.parent.clear_all_selections()
+
             # Clear any previous selection
             self.parent.selected_item = ("container", container_id)
             self.parent.selected_stack_data = None
@@ -395,6 +418,14 @@ class StackManager:
             # Find the container data
             stack_name, row_idx = self.container_rows[container_id]
             table = self.stack_tables[stack_name]
+
+            # Store the selected row for custom rendering
+            self._set_row_selection(table, container_id)
+
+            # Add has-selection class and move cursor for visual feedback
+            table.add_class("has-selection")
+            if row_idx < table.row_count:
+                table.move_cursor(row=row_idx)
 
             # Use cached full container data if available
             if container_id in self._container_data_cache:
@@ -461,11 +492,35 @@ class StackManager:
         else:
             logger.error(f"Container ID {container_id} not found in container_rows")
 
+    def _clear_row_selection(self, table: DataTable) -> None:
+        """Clear row selection by removing stored selection state."""
+        if hasattr(table, "_selected_row_key"):
+            delattr(table, "_selected_row_key")
+
+    def _set_row_selection(self, table: DataTable, container_id: str) -> None:
+        """Store the selected row key for custom rendering."""
+        logger.debug(f"_set_row_selection called for container_id: {container_id}")
+        # Store the selected row key on the table
+        table._selected_row_key = container_id
+
     def clear_tables(self) -> None:
         """Clear all stack tables."""
+        # Save which table has selection and which row before clearing
+        selected_table_and_row = None
+        for stack_name, table in self.stack_tables.items():
+            if table.has_class("has-selection") and hasattr(table, "_selected_row_key"):
+                selected_table_and_row = (stack_name, table._selected_row_key)
+                break
+
         for table in self.stack_tables.values():
             table.clear()
+            # Remove has-selection class when clearing
+            table.remove_class("has-selection")
         self.container_rows.clear()
+
+        # Store the selection info for restoration later
+        if selected_table_and_row:
+            self._pending_selection = selected_table_and_row
 
     def reset_tracking(self) -> None:
         """Reset tracking for new data updates."""

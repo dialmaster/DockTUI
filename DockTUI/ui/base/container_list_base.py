@@ -159,17 +159,25 @@ class ContainerListBase(VerticalScroll):
         max-height: 100%;
     }
 
-    /* Force cursor to be invisible when table is not focused */
+    /* Hide cursor by default on all tables */
     DataTable > .datatable--cursor {
         background: transparent !important;
         color: $text !important;
         text-style: none !important;
     }
 
-    /* Show cursor only when table is focused */
-    DataTable:focus > .datatable--cursor {
+    /* Show cursor only on tables with selected items */
+    DataTable.has-selection > .datatable--cursor {
+        background: $primary-darken-2 !important;
+        color: $text !important;
+        text-style: none !important;
+    }
+
+    /* Brighter cursor when focused table has selection */
+    DataTable.has-selection:focus > .datatable--cursor {
         background: $primary !important;
         color: $text !important;
+        text-style: none !important;
     }
 
     /* Style for row hover */
@@ -275,6 +283,41 @@ class ContainerListBase(VerticalScroll):
 
         if self.networks_container is None:
             self.networks_container = Container(classes="networks-group")
+
+    def clear_all_selections(self) -> None:
+        """Clear all selection states from headers and tables."""
+        # Clear 'selected' class from all headers
+        if hasattr(self, "stack_headers"):
+            for header in self.stack_headers.values():
+                header.remove_class("selected")
+        if hasattr(self, "network_headers"):
+            for header in self.network_headers.values():
+                header.remove_class("selected")
+        if hasattr(self, "volume_headers"):
+            for header in self.volume_headers.values():
+                header.remove_class("selected")
+
+        # Clear 'has-selection' class from all tables
+        if hasattr(self, "stack_tables"):
+            for table in self.stack_tables.values():
+                table.remove_class("has-selection")
+                # Clear custom row selection if using stack manager's approach
+                if hasattr(self, "stack_manager"):
+                    self.stack_manager._clear_row_selection(table)
+
+        if (
+            hasattr(self, "image_manager")
+            and hasattr(self.image_manager, "images_table")
+            and self.image_manager.images_table
+        ):
+            self.image_manager.images_table.remove_class("has-selection")
+
+        if (
+            hasattr(self, "volume_manager")
+            and hasattr(self.volume_manager, "volume_table")
+            and self.volume_manager.volume_table
+        ):
+            self.volume_manager.volume_table.remove_class("has-selection")
 
     def create_network_table(self, network_name: str) -> DataTable:
         """Create a new DataTable for displaying network container information.

@@ -455,6 +455,12 @@ class TestStackManager(unittest.TestCase):
             "80:80"  # ports
         ]
         mock_table.cursor_row = 0
+        mock_table.row_count = 2  # Set row_count to avoid Mock comparison
+        
+        # Make move_cursor update cursor_row to simulate real behavior
+        def move_cursor_side_effect(row):
+            mock_table.cursor_row = row
+        mock_table.move_cursor.side_effect = move_cursor_side_effect
 
         mock_header = Mock()
         mock_header.expanded = True
@@ -491,6 +497,7 @@ class TestStackManager(unittest.TestCase):
         """Test selecting container in collapsed stack expands it."""
         mock_table = Mock()
         mock_table.get_cell_at.return_value = "value"
+        mock_table.row_count = 1  # Set row_count to avoid Mock comparison
         mock_header = Mock()
         mock_header.expanded = False
 
@@ -510,6 +517,13 @@ class TestStackManager(unittest.TestCase):
         mock_table = Mock()
         mock_table.get_cell_at.return_value = "value"
         mock_table.cursor_row = 0
+        mock_table.row_count = 2  # Set row_count to avoid Mock comparison
+        
+        # Make move_cursor update cursor_row to simulate real behavior
+        def move_cursor_side_effect(row):
+            mock_table.cursor_row = row
+        mock_table.move_cursor.side_effect = move_cursor_side_effect
+        
         mock_header = Mock()
         mock_header.expanded = True
 

@@ -103,6 +103,13 @@ class NetworkHeader(Static):
         text-style: bold;
     }
 
+    NetworkHeader.selected:blur {
+        background: $surface-lighten-1;
+        color: $accent;
+        text-style: bold;
+        opacity: 0.8;
+    }
+
     .network-header--header {
         color: $text;
         text-style: bold;
@@ -261,6 +268,13 @@ class VolumeHeader(Static):
         text-style: bold;
     }
 
+    VolumeHeader.selected:blur {
+        background: $surface-lighten-1;
+        color: $secondary;
+        text-style: bold;
+        opacity: 0.8;
+    }
+
     .volume-header--header {
         color: $text;
         text-style: bold;
@@ -386,6 +400,13 @@ class StackHeader(Static):
         background: $surface-lighten-2;
         color: $primary-lighten-2;
         text-style: bold;
+    }
+
+    StackHeader.selected:blur {
+        background: $surface-lighten-1;
+        color: $primary;
+        text-style: bold;
+        opacity: 0.8;
     }
 
     .stack-header--header {
