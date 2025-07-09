@@ -26,9 +26,10 @@ class VirtualScrollManager:
     # Constants
     DEFAULT_WIDTH = 80
     MIN_VIRTUAL_HEIGHT = 1
-    VIRTUAL_SIZE_DEBOUNCE_DELAY = (
-        1.0  # seconds to wait before recalculating virtual size
-    )
+    # Seconds to wait before recalculating virtual size
+    # This prevents the UI from becoming unresponsive when very large amounts of logs are being added
+    # At the expense of the scrollbar/UI only being updated every X seconds
+    VIRTUAL_SIZE_THROTTLE_DELAY = 0.3
 
     def __init__(self):
         """Initialize the virtual scroll manager."""
@@ -128,21 +129,18 @@ class VirtualScrollManager:
         with self._lock:
             self._virtual_size_pending = True
 
-            # Cancel existing timer if any
-            if self._virtual_size_timer is not None:
-                self._virtual_size_timer.cancel()
-
-            # Schedule new recalculation
-            self._virtual_size_timer = threading.Timer(
-                self.VIRTUAL_SIZE_DEBOUNCE_DELAY,
-                self._perform_virtual_size_recalculation,
-                args=(callback_fn,),
-            )
-            self._virtual_size_timer.daemon = True
-            self._virtual_size_timer.start()
+            if self._virtual_size_timer is None:
+                # Schedule new recalculation
+                self._virtual_size_timer = threading.Timer(
+                    self.VIRTUAL_SIZE_THROTTLE_DELAY,
+                    self._perform_virtual_size_recalculation,
+                    args=(callback_fn,),
+                )
+                self._virtual_size_timer.daemon = True
+                self._virtual_size_timer.start()
 
     def invalidate_virtual_size_immediate(self):
-        """Immediately invalidate virtual size cache without debouncing."""
+        """Immediately invalidate virtual size cache with no throttling."""
         with self._lock:
             # Cancel any pending timer
             if self._virtual_size_timer is not None:

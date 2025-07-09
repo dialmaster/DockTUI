@@ -49,9 +49,6 @@ class RichLogViewer(ScrollView):
     MIN_VIRTUAL_HEIGHT = 1
     MAX_CACHE_SIZE = 1000  # Maximum number of cached lines
     DEFAULT_MAX_LINES = 2000  # Default maximum number of log lines to keep
-    VIRTUAL_SIZE_DEBOUNCE_DELAY = (
-        1.0  # seconds to wait before recalculating virtual size
-    )
 
     # Reactive properties
     auto_follow = reactive(True)
