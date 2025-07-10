@@ -140,11 +140,6 @@ elif [[ -f "$HOME/.config/DockTUI/DockTUI.yaml" ]]; then
     CONFIG_FILE="$HOME/.config/DockTUI/DockTUI.yaml"
 fi
 
-# Create logs directory if in debug mode
-if [[ "$DEBUG_MODE" == true ]]; then
-    mkdir -p "$LOG_DIR"
-fi
-
 # Clean up any existing container
 docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
 
@@ -155,13 +150,16 @@ DOCKER_CMD="$DOCKER_CMD -it"  # Interactive and TTY for terminal UI
 
 # Handle Docker socket mounting based on OS
 if [[ "$(uname)" == "Darwin" ]]; then
-    # macOS - Special handling for Docker Desktop
+    # macOS - Special handling for Docker Desktop and Colima
     if [[ "$DOCKER_SOCKET_SOURCE" == "/var/run/docker.sock" ]]; then
-        # Docker Desktop on macOS - use the socket as-is
+        # Docker Desktop on macOS - use the socket as-is with read-only
         DOCKER_CMD="$DOCKER_CMD -v /var/run/docker.sock:/var/run/docker.sock:ro"
     else
         # Colima or other Docker implementations
-        DOCKER_CMD="$DOCKER_CMD -v $DOCKER_SOCKET_SOURCE:/var/run/docker.sock"
+        # Need to mount with rw permissions and ensure socket is accessible
+        DOCKER_CMD="$DOCKER_CMD -v $DOCKER_SOCKET_SOURCE:/var/run/docker.sock:rw"
+        # For Colima, we also need to ensure the socket permissions are correct
+        DOCKER_CMD="$DOCKER_CMD --group-add 0"  # Add root group for socket access
     fi
 else
     # Linux/WSL - Standard socket mounting
@@ -172,15 +170,24 @@ DOCKER_CMD="$DOCKER_CMD -v /:/host:ro"  # Mount entire filesystem read-only for 
 DOCKER_CMD="$DOCKER_CMD -v $HOME:$HOME:ro"  # Mount home directory for better compatibility
 DOCKER_CMD="$DOCKER_CMD -w /host$(pwd)"  # Set working directory to current directory
 
+# Create logs directory on host if it doesn't exist (for debug mode)
+if [[ "$DEBUG_MODE" == true ]]; then
+    mkdir -p "$LOG_DIR"
+fi
+
 # Add config file mount if found
 if [[ -n "$CONFIG_FILE" ]]; then
     DOCKER_CMD="$DOCKER_CMD -v $CONFIG_FILE:/config/DockTUI.yaml:ro"
     DOCKER_CMD="$DOCKER_CMD -e DOCKTUI_CONFIG=/config/DockTUI.yaml"
 fi
 
-# Add log directory mount if in debug mode
+# Add log directory mount and environment if in debug mode
 if [[ "$DEBUG_MODE" == true ]]; then
-    DOCKER_CMD="$DOCKER_CMD -v $LOG_DIR:/app/logs"
+    # Create a writable logs directory inside container at /app/logs
+    # and mount the host logs directory there for easy access
+    DOCKER_CMD="$DOCKER_CMD -v $LOG_DIR:/app/logs:rw"
+    # Set DOCKTUI_LOG_DIR to tell the app to use /app/logs instead of ./logs
+    DOCKER_CMD="$DOCKER_CMD -e DOCKTUI_LOG_DIR=/app/logs"
     DOCKER_CMD="$DOCKER_CMD -e DOCKTUI_DEBUG=1"
     echo -e "${YELLOW}Debug mode enabled. Logs will be written to: $LOG_DIR${NC}"
 fi
@@ -193,6 +200,9 @@ if [[ "$(uname)" == "Darwin" ]]; then
     if [[ "$DOCKER_SOCKET_SOURCE" == "/var/run/docker.sock" ]] || [[ "$DOCKER_SOCKET_SOURCE" == "$HOME/.docker/run/docker.sock" ]]; then
         DOCKER_CMD="$DOCKER_CMD --privileged"
         echo -e "${YELLOW}Note: Using privileged mode for Docker Desktop socket access${NC}"
+    elif [[ "$DOCKER_SOCKET_SOURCE" =~ \.colima ]]; then
+        DOCKER_CMD="$DOCKER_CMD --privileged"
+        echo -e "${YELLOW}Note: Using privileged mode for Colima socket access${NC}"
     fi
 else
     # On Linux, use host user for proper file permissions
@@ -260,7 +270,14 @@ trap cleanup EXIT
 
 # Run the container
 echo -e "${GREEN}Starting DockTUI...${NC}"
-$DOCKER_CMD "$IMAGE_NAME"
+if [[ "$DEBUG_MODE" == true ]]; then
+    echo -e "${YELLOW}Docker command: $DOCKER_CMD \"$IMAGE_NAME\"${NC}"
+fi
+
+if ! $DOCKER_CMD "$IMAGE_NAME"; then
+    EXIT_CODE=$?
+    echo -e "${RED}DockTUI exited with error code: $EXIT_CODE${NC}"
+fi
 
 # Return to normal terminal
 echo -e "${GREEN}DockTUI exited. Returning to normal terminal.${NC}"
