@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Start script for DockTUI - pulls and runs from Docker Hub
-# This script pulls the latest DockTUI image from Docker Hub and runs it
+# Run DockTUI using locally built Docker image
+# This script runs the 'docktui:local' image built by build-local.sh
 
 set -e  # Exit on any error
 
@@ -13,8 +13,6 @@ NC='\033[0m' # No Color
 
 # Parse command line arguments
 DEBUG_MODE=false
-UPDATE=false
-VERSION="latest"
 HELP=false
 
 while [[ $# -gt 0 ]]; do
@@ -22,14 +20,6 @@ while [[ $# -gt 0 ]]; do
         -d|--debug)
             DEBUG_MODE=true
             shift
-            ;;
-        -u|--update)
-            UPDATE=true
-            shift
-            ;;
-        -v|--version)
-            VERSION="$2"
-            shift 2
             ;;
         -h|--help)
             HELP=true
@@ -47,28 +37,26 @@ done
 if [[ "$HELP" == true ]]; then
     echo "Usage: $0 [OPTIONS]"
     echo ""
-    echo "Run DockTUI from Docker Hub image."
+    echo "Run DockTUI using locally built Docker image."
+    echo "Build the image first with: ./scripts-dev/build-local.sh"
     echo ""
     echo "Options:"
-    echo "  -d, --debug           Enable debug mode with detailed logging"
-    echo "  -u, --update          Force pull the latest image"
-    echo "  -v, --version TAG     Use specific version tag (default: latest)"
-    echo "  -h, --help            Show this help message"
+    echo "  -d, --debug    Enable debug mode with detailed logging"
+    echo "  -h, --help     Show this help message"
     echo ""
     echo "Examples:"
-    echo "  $0                    # Run latest version"
-    echo "  $0 -d                 # Run with debug logging"
-    echo "  $0 -u                 # Update to latest version"
-    echo "  $0 -v 1.0.0          # Run specific version"
+    echo "  $0              # Run normally"
+    echo "  $0 -d           # Run with debug logging"
     exit 0
 fi
 
 # Configuration
-IMAGE_NAME="dialmaster/docktui:${VERSION}"
+IMAGE_NAME="docktui:local"
 CONTAINER_NAME="docktui-app"
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 CONFIG_FILE=""
-LOG_DIR="${SCRIPT_DIR}/logs"
+LOG_DIR="${PROJECT_DIR}/logs"
 
 # Check if Docker is installed and running
 if ! command -v docker &> /dev/null; then
@@ -81,19 +69,16 @@ if ! docker info &> /dev/null; then
     exit 1
 fi
 
-# Pull the image if update requested or image doesn't exist
-if [[ "$UPDATE" == true ]] || ! docker image inspect "$IMAGE_NAME" &> /dev/null 2>&1; then
-    echo -e "${GREEN}Pulling DockTUI image from Docker Hub...${NC}"
-    if ! docker pull "$IMAGE_NAME"; then
-        echo -e "${RED}Failed to pull Docker image${NC}"
-        echo -e "${YELLOW}Check your internet connection or try a different version with -v${NC}"
-        exit 1
-    fi
+# Check if local image exists
+if ! docker image inspect "$IMAGE_NAME" &> /dev/null; then
+    echo -e "${RED}Error: Local image '$IMAGE_NAME' not found.${NC}"
+    echo -e "${YELLOW}Build it first with: ./scripts-dev/build-local.sh${NC}"
+    exit 1
 fi
 
 # Find configuration file
-if [[ -f "$SCRIPT_DIR/DockTUI.yaml" ]]; then
-    CONFIG_FILE="$SCRIPT_DIR/DockTUI.yaml"
+if [[ -f "$PROJECT_DIR/DockTUI.yaml" ]]; then
+    CONFIG_FILE="$PROJECT_DIR/DockTUI.yaml"
 elif [[ -f "$HOME/.config/DockTUI/DockTUI.yaml" ]]; then
     CONFIG_FILE="$HOME/.config/DockTUI/DockTUI.yaml"
 fi
@@ -184,7 +169,7 @@ cleanup() {
 trap cleanup EXIT
 
 # Run the container
-echo -e "${GREEN}Starting DockTUI...${NC}"
+echo -e "${GREEN}Starting DockTUI (local build)...${NC}"
 $DOCKER_CMD "$IMAGE_NAME"
 
 # Return to normal terminal

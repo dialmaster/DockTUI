@@ -25,46 +25,47 @@ DockTUI is a terminal user interface (TUI) that provides a real-time dashboard f
 
 ### Prerequisites
 
-- Python 3.12 or higher
 - Docker Engine installed and running
 - Docker Compose v2 (the `docker compose` command)
 - Unix-like terminal (Linux, macOS, or WSL2 on Windows)
 
+> **Note:** No Python or other dependencies required! DockTUI runs entirely in Docker.
+
 ### Quick Start
 
 ```bash
-# Clone the repository
+# Option 1: Run directly (no clone needed)
+curl -sSL https://raw.githubusercontent.com/dialmaster/DockTUI/main/start.sh | bash
+
+# Option 2: Clone and run
 git clone https://github.com/dialmaster/DockTUI.git
 cd DockTUI
-
-# Run DockTUI (automatically installs dependencies)
 ./start.sh
 ```
 
-That's it! The `start.sh` script handles everything for you.
+That's it! The script automatically pulls and runs DockTUI from Docker Hub.
 
 ### Start Options
 
 ```bash
-./start.sh           # Run normally
+./start.sh           # Run latest version
 ./start.sh -d        # Run with debug logging
+./start.sh -u        # Update to latest version
+./start.sh -v 1.0.0  # Run specific version
 ./start.sh -h        # Show help
 ```
 
-### Manual Installation
+### Features of Dockerized Setup
 
-If you prefer to install manually:
+- **Zero build time** - Pre-built images from Docker Hub
+- **Automatic updates** - Just use `-u` flag to get latest version
+- **Multi-platform** - Works on AMD64 and ARM64 (including M1 Macs)
+- **Version control** - Pin to specific versions with `-v`
+- **Full functionality** - All features work including clipboard support
 
-```bash
-# Install Poetry if not already installed
-pip install poetry
+### For Developers
 
-# Install dependencies
-poetry install
-
-# Run DockTUI
-poetry run DockTUI
-```
+If you want to contribute or run DockTUI without Docker, see [DEVELOPMENT.md](DEVELOPMENT.md) for Python/Poetry setup instructions.
 
 ## Usage
 
@@ -181,24 +182,11 @@ export DOCKTUI_LOG_SINCE=1h
 
 ## Clipboard Support
 
-DockTUI supports copying log text to your clipboard:
+DockTUI automatically handles clipboard integration. Selected text from logs can be copied to your system clipboard with:
+- Click and drag to select text
+- Right click to copy
 
-### Local Setup
-Works automatically on most systems. For Linux/WSL2, install `xclip`:
-
-```bash
-sudo apt-get install xclip
-```
-
-### Running in Docker
-When running DockTUI inside a container, use file-based clipboard:
-
-```bash
-docker run -v /tmp/clipboard:/tmp/clipboard \
-           -e DOCKTUI_IN_CONTAINER=1 \
-           -e DOCKTUI_CLIPBOARD_FILE=/tmp/clipboard/clipboard.txt \
-           DockTUI
-```
+The dockerized version automatically syncs the clipboard with your host system.
 
 ## Troubleshooting
 
@@ -213,8 +201,8 @@ docker run -v /tmp/clipboard:/tmp/clipboard \
 - Update Docker to get the integrated `docker compose` command
 
 **Clipboard not working**
-- Linux/WSL2: Install `xclip` with `sudo apt-get install xclip`
-- Containers: Set up file-based clipboard as shown above
+- Ensure your host system has a clipboard tool (xclip, pbcopy, etc.)
+- The Docker version handles clipboard sync automatically
 
 **Performance issues with many containers**
 - Adjust log settings in configuration
@@ -226,9 +214,6 @@ Enable detailed logging to troubleshoot issues:
 
 ```bash
 ./start.sh -d
-# or
-export DOCKTUI_DEBUG=1
-python -m DockTUI
 ```
 
 Debug logs are saved to `./logs/DockTUI_debug.log`.

@@ -1,0 +1,38 @@
+# Git
+.git/
+.gitignore
+
+# Python cache
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Logs and temp files
+logs/
+*.log
+*.tmp
+
+# Tests (not needed at runtime)
+tests/
+
+# Documentation
+*.md
+
+# Development files
+Makefile
+.pre-commit-config.yaml
+scripts-dev/
+
+# OS files
+.DS_Store

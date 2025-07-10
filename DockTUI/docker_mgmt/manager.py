@@ -99,6 +99,9 @@ class DockerManager:
         try:
             containers = self.client.containers.list(all=True)
 
+            # Filter out the DockTUI container itself to prevent users from stopping their own session
+            containers = [c for c in containers if c.name != "docktui-app"]
+
             for container in containers:
                 try:
                     project = container.labels.get(
@@ -168,6 +171,9 @@ class DockerManager:
 
             # Get all running containers
             containers = self.client.containers.list(filters={"status": "running"})
+
+            # Filter out the DockTUI container
+            containers = [c for c in containers if c.name != "docktui-app"]
             logger.debug(f"Found {len(containers)} running containers")
 
             if not containers:
@@ -737,6 +743,8 @@ class DockerManager:
             def fetch_containers():
                 nonlocal all_containers
                 all_containers = self.client.containers.list(all=True)
+                # Filter out the DockTUI container
+                all_containers = [c for c in all_containers if c.name != "docktui-app"]
 
             # Create threads for concurrent fetching
             image_thread = threading.Thread(target=fetch_images)
