@@ -3,10 +3,12 @@
 import asyncio
 from queue import Queue, Empty
 from datetime import datetime
-from unittest.mock import Mock, MagicMock, patch, PropertyMock
+from unittest.mock import Mock, MagicMock, patch, PropertyMock, AsyncMock
 
 import pytest
 from textual.document._document import Selection
+from textual.events import Key
+from textual.widgets import Checkbox, Select, Input, Button
 
 from DockTUI.ui.viewers.log_pane import LogPane
 
@@ -563,3 +565,578 @@ class TestLogPane:
         # Display state should be updated
         assert log_pane.log_display.display == True
         assert log_pane.no_selection_display.display == False
+
+    def test_init_with_docker_client_success(self):
+        """Test successful Docker client initialization."""
+        with patch('docker.from_env') as mock_docker:
+            mock_docker.return_value = Mock()
+            with patch('DockTUI.config.config.get') as mock_config:
+                mock_config.side_effect = lambda key, default: default
+                pane = LogPane()
+                assert pane.docker_client is not None
+                assert pane.LOG_TAIL == "200"
+                assert pane.LOG_SINCE == "15m"
+                
+    def test_init_with_docker_client_failure(self):
+        """Test Docker client initialization failure."""
+        with patch('docker.from_env') as mock_docker:
+            mock_docker.side_effect = Exception("Docker not available")
+            with patch('DockTUI.config.config.get') as mock_config:
+                mock_config.side_effect = lambda key, default: default
+                pane = LogPane()
+                assert pane.docker_client is None
+                
+    def test_compose_creates_ui_components(self, log_pane):
+        """Test that compose creates all UI components."""
+        # Instead of running compose (which creates real widgets), just call it to verify it doesn't crash
+        # and check that it initializes the attributes we expect
+        
+        # Mock widget classes to avoid Textual initialization
+        with patch('DockTUI.ui.viewers.log_pane.Static') as mock_static, \
+             patch('DockTUI.ui.viewers.log_pane.Input') as mock_input, \
+             patch('DockTUI.ui.viewers.log_pane.Checkbox') as mock_checkbox, \
+             patch('DockTUI.ui.viewers.log_pane.Button') as mock_button, \
+             patch('DockTUI.ui.viewers.log_pane.RichLogViewer') as mock_rich_log, \
+             patch('DockTUI.ui.viewers.log_pane.Label') as mock_label, \
+             patch('DockTUI.ui.viewers.log_pane.Horizontal') as mock_horizontal, \
+             patch('DockTUI.ui.viewers.log_pane.Container') as mock_container:
+            
+            # Mock the create methods too
+            log_pane._create_tail_select = Mock(return_value=Mock())
+            log_pane._create_since_select = Mock(return_value=Mock())
+            
+            # Run compose - it should set up all the UI components
+            list(log_pane.compose())
+            
+            # Verify that all UI components were created
+            mock_static.assert_called()  # Header and no_selection_display
+            mock_input.assert_called()   # Search input
+            mock_checkbox.assert_called()  # Auto-follow checkbox
+            mock_button.assert_called()   # Mark position button
+            mock_rich_log.assert_called()  # Log display
+            
+            # Should have called the create methods
+            log_pane._create_tail_select.assert_called_once()
+            log_pane._create_since_select.assert_called_once()
+            
+            # Check that log_queue_processor has log_display set
+            log_pane.log_queue_processor.set_log_display.assert_called_once()
+        
+    def test_on_mount_starts_timer(self, log_pane):
+        """Test that on_mount sets up the timer and UI components."""
+        # Mock set_interval
+        log_pane.set_interval = Mock(return_value=Mock())
+        
+        # Call on_mount
+        log_pane.on_mount()
+        
+        # Should set up timer
+        log_pane.set_interval.assert_called_once_with(0.1, log_pane._process_log_queue)
+        assert log_pane.queue_timer is not None
+        
+        # Should set UI components in state manager
+        log_pane.log_state_manager.set_ui_components.assert_called_once_with(
+            log_pane.header, log_pane.log_display
+        )
+        
+    def test_on_unmount_cleanup(self, log_pane):
+        """Test that on_unmount cleans up resources."""
+        # Set up resources
+        log_pane.queue_timer = Mock()
+        log_pane.queue_timer.stop = Mock()
+        
+        # Call on_unmount
+        log_pane.on_unmount()
+        
+        # Should stop streaming and timer
+        log_pane.log_stream_manager.stop_streaming.assert_called_once_with(wait=True)
+        log_pane.queue_timer.stop.assert_called_once()
+        log_pane.log_filter_manager.cleanup.assert_called_once()
+        
+    def test_on_input_changed_search(self, log_pane):
+        """Test search input change handling."""
+        # Create mock event
+        event = Mock()
+        event.input = Mock(id="search-input")
+        event.value = "test search"
+        
+        # Call on_input_changed
+        log_pane.on_input_changed(event)
+        
+        # Should handle search input
+        log_pane.log_filter_manager.handle_search_input_changed.assert_called_once_with("test search")
+        
+    def test_on_checkbox_changed_auto_follow(self, log_pane):
+        """Test auto-follow checkbox change handling."""
+        # Create mock event
+        event = Mock()
+        event.checkbox = Mock(id="auto-follow-checkbox")
+        event.value = True
+        
+        # Mock _auto_scroll_to_bottom
+        log_pane._auto_scroll_to_bottom = Mock()
+        
+        # Call on_checkbox_changed
+        log_pane.on_checkbox_changed(event)
+        
+        # Should update auto-follow state
+        log_pane.log_state_manager.set_auto_follow.assert_called_once_with(True)
+        log_pane._auto_scroll_to_bottom.assert_called_once()
+        
+    def test_on_select_changed_tail(self, log_pane):
+        """Test tail dropdown change handling."""
+        # Create mock event
+        event = Mock()
+        event.select = Mock(id="tail-select")
+        event.value = "500"
+        
+        # Set up current item
+        log_pane.log_state_manager.current_item = ("container", "test_id")
+        log_pane.log_display.display = True
+        
+        # Mock _restart_logs
+        log_pane._restart_logs = Mock()
+        
+        # Call on_select_changed
+        log_pane.on_select_changed(event)
+        
+        # Should update tail value and restart logs
+        assert log_pane.LOG_TAIL == "500"
+        log_pane.log_stream_manager.update_settings.assert_called_once_with(tail="500")
+        log_pane._restart_logs.assert_called_once()
+        
+    def test_on_select_changed_since(self, log_pane):
+        """Test since dropdown change handling."""
+        # Create mock event
+        event = Mock()
+        event.select = Mock(id="since-select")
+        event.value = "30m"
+        
+        # Set up current item
+        log_pane.log_state_manager.current_item = ("container", "test_id")
+        log_pane.log_display.display = True
+        
+        # Mock _restart_logs
+        log_pane._restart_logs = Mock()
+        
+        # Call on_select_changed
+        log_pane.on_select_changed(event)
+        
+        # Should update since value and restart logs
+        assert log_pane.LOG_SINCE == "30m"
+        log_pane.log_stream_manager.update_settings.assert_called_once_with(since="30m")
+        log_pane._restart_logs.assert_called_once()
+        
+    def test_on_button_pressed_mark_position(self, log_pane):
+        """Test mark position button press handling."""
+        # Create mock event
+        event = Mock()
+        event.button = Mock(id="mark-position-button")
+        
+        # Mock _mark_position
+        log_pane._mark_position = Mock()
+        
+        # Call on_button_pressed
+        log_pane.on_button_pressed(event)
+        
+        # Should call _mark_position
+        log_pane._mark_position.assert_called_once()
+        
+    def test_action_copy_selection_with_text(self, log_pane):
+        """Test copying selected text to clipboard."""
+        # Set up selected text
+        log_pane.log_display.display = True
+        log_pane.log_display.selected_text = "Selected text to copy"
+        
+        # Mock copy_to_clipboard_async
+        with patch('DockTUI.ui.viewers.log_pane.copy_to_clipboard_async') as mock_copy:
+            # Call action_copy_selection
+            log_pane.action_copy_selection()
+            
+            # Should call copy_to_clipboard_async
+            mock_copy.assert_called_once()
+            args = mock_copy.call_args[0]
+            assert args[0] == "Selected text to copy"
+            # Get the callback function
+            callback = args[1]
+            
+            # Test success callback
+            callback(True)
+            log_pane.app.notify.assert_called_with(
+                "Text copied to clipboard",
+                severity="information",
+                timeout=2
+            )
+            
+            # Reset and test failure callback
+            log_pane.app.notify.reset_mock()
+            callback(False)
+            log_pane.app.notify.assert_called_with(
+                "Failed to copy to clipboard. Please install xclip or pyperclip.",
+                severity="error",
+                timeout=3
+            )
+            
+    def test_action_copy_selection_no_text(self, log_pane):
+        """Test copying with no selected text."""
+        # Set up no selected text
+        log_pane.log_display.display = True
+        log_pane.log_display.selected_text = ""
+        
+        # Mock copy_to_clipboard_async
+        with patch('DockTUI.ui.viewers.log_pane.copy_to_clipboard_async') as mock_copy:
+            # Call action_copy_selection
+            log_pane.action_copy_selection()
+            
+            # Should not call copy_to_clipboard_async
+            mock_copy.assert_not_called()
+            
+    def test_action_select_all(self, log_pane):
+        """Test selecting all text in log display."""
+        # Set up log display
+        log_pane.log_display.display = True
+        log_pane.log_display.select_all = Mock()
+        
+        # Call action_select_all
+        log_pane.action_select_all()
+        
+        # Should call select_all on log display
+        log_pane.log_display.select_all.assert_called_once()
+        
+    def test_show_no_logs_message_for_item_type(self, log_pane):
+        """Test showing no logs message for item types without logs."""
+        # Mock methods
+        log_pane._clear_logs = Mock()
+        log_pane._set_log_text = Mock()
+        log_pane.refresh = Mock()
+        
+        # Test for network
+        log_pane._show_no_logs_message_for_item_type("Networks")
+        
+        # Should show appropriate message
+        assert log_pane.log_display.display == True
+        assert log_pane.no_selection_display.display == False
+        log_pane._clear_logs.assert_called_once()
+        log_pane._set_log_text.assert_called_once_with(
+            "Networks do not have logs. Select a container or stack to view logs."
+        )
+        log_pane.log_stream_manager.stop_streaming.assert_called_with(wait=False)
+        log_pane.refresh.assert_called_once()
+        
+    def test_restart_logs(self, log_pane):
+        """Test restarting logs with new settings."""
+        # Set up current item
+        log_pane.log_state_manager.current_item = ("container", "test_id")
+        
+        # Mock methods
+        log_pane._clear_logs = Mock()
+        log_pane._set_log_text = Mock()
+        
+        # Call _restart_logs
+        log_pane._restart_logs()
+        
+        # Should clear and show loading message
+        log_pane._clear_logs.assert_called_once()
+        log_pane._set_log_text.assert_called_once_with(
+            "Reloading logs for container: test_id...\n"
+        )
+        assert log_pane.log_stream_manager.showing_loading_message == True
+        log_pane.log_stream_manager.restart_streaming.assert_called_once()
+        
+    def test_auto_scroll_to_bottom_enabled(self, log_pane):
+        """Test auto-scrolling when enabled."""
+        # Set up auto-follow enabled
+        log_pane.log_state_manager.should_auto_scroll = Mock(return_value=True)
+        log_pane.log_display.scroll_to_end_immediate = Mock()
+        
+        # Call _auto_scroll_to_bottom
+        log_pane._auto_scroll_to_bottom()
+        
+        # Should scroll to bottom
+        log_pane.log_display.scroll_to_end_immediate.assert_called_once()
+        
+    def test_auto_scroll_to_bottom_disabled(self, log_pane):
+        """Test auto-scrolling when disabled."""
+        # Set up auto-follow disabled
+        log_pane.log_state_manager.should_auto_scroll = Mock(return_value=False)
+        log_pane.log_display.scroll_to_end_immediate = Mock()
+        
+        # Call _auto_scroll_to_bottom
+        log_pane._auto_scroll_to_bottom()
+        
+        # Should not scroll
+        log_pane.log_display.scroll_to_end_immediate.assert_not_called()
+        
+    def test_clear_log_display(self, log_pane):
+        """Test clearing the log display."""
+        # Mock clear method
+        log_pane.log_display.clear = Mock()
+        
+        # Call _clear_log_display
+        log_pane._clear_log_display()
+        
+        # Should clear display
+        log_pane.log_display.clear.assert_called_once()
+        
+    def test_get_log_text(self, log_pane):
+        """Test getting log text from display."""
+        # Set up visible lines
+        mock_line1 = Mock(raw_text="Line 1")
+        mock_line2 = Mock(raw_text="Line 2")
+        log_pane.log_display.visible_lines = [mock_line1, mock_line2]
+        
+        # Call _get_log_text
+        result = log_pane._get_log_text()
+        
+        # Should join lines
+        assert result == "Line 1\nLine 2"
+        
+    def test_update_header(self, log_pane):
+        """Test updating header text."""
+        # Call _update_header
+        log_pane._update_header("New header text")
+        
+        # Should delegate to state manager
+        log_pane.log_state_manager.update_header.assert_called_once_with("New header text")
+        
+    def test_set_log_text(self, log_pane):
+        """Test setting log display text."""
+        # Mock methods
+        log_pane.log_display.clear = Mock()
+        log_pane.log_display.add_log_line = Mock()
+        
+        # Call _set_log_text with multiline text
+        log_pane._set_log_text("Line 1\nLine 2\nLine 3\n")
+        
+        # Should clear and add lines
+        log_pane.log_display.clear.assert_called_once()
+        assert log_pane.log_display.add_log_line.call_count == 3
+        log_pane.log_display.add_log_line.assert_any_call("Line 1", is_system_message=True)
+        log_pane.log_display.add_log_line.assert_any_call("Line 2", is_system_message=True)
+        log_pane.log_display.add_log_line.assert_any_call("Line 3", is_system_message=True)
+        
+    def test_create_tail_select_default(self, log_pane):
+        """Test creating tail select with default value."""
+        # Mock the Select class to avoid Textual initialization issues
+        with patch('DockTUI.ui.viewers.log_pane.Select') as mock_select:
+            mock_instance = Mock()
+            mock_select.return_value = mock_instance
+            
+            # Call _create_tail_select
+            select = log_pane._create_tail_select()
+            
+            # Should create select with correct properties
+            mock_select.assert_called_once()
+            args, kwargs = mock_select.call_args
+            assert kwargs['value'] == "200"
+            assert kwargs['id'] == "tail-select"
+            assert kwargs['classes'] == "log-setting"
+            
+    def test_create_tail_select_custom_value(self, log_pane):
+        """Test creating tail select with custom value not in options."""
+        # Set custom value
+        log_pane.LOG_TAIL = "999"
+        
+        # Mock the Select class
+        with patch('DockTUI.ui.viewers.log_pane.Select') as mock_select:
+            mock_instance = Mock()
+            mock_select.return_value = mock_instance
+            
+            # Call _create_tail_select
+            select = log_pane._create_tail_select()
+            
+            # Should add custom value to options and use it
+            args, kwargs = mock_select.call_args
+            assert kwargs['value'] == "999"
+            # Check that custom option was added
+            options = kwargs['options']
+            assert any(opt[1] == "999" for opt in options)
+            
+    def test_create_since_select_default(self, log_pane):
+        """Test creating since select with default value."""
+        # Mock the Select class
+        with patch('DockTUI.ui.viewers.log_pane.Select') as mock_select:
+            mock_instance = Mock()
+            mock_select.return_value = mock_instance
+            
+            # Call _create_since_select
+            select = log_pane._create_since_select()
+            
+            # Should create select with correct properties
+            mock_select.assert_called_once()
+            args, kwargs = mock_select.call_args
+            assert kwargs['value'] == "15m"
+            assert kwargs['id'] == "since-select"
+            assert kwargs['classes'] == "log-setting"
+        
+    def test_refilter_logs_with_filter(self, log_pane):
+        """Test re-filtering logs with active filter."""
+        # Set up scenario with logs and filter
+        log_pane.log_stream_manager.showing_no_logs_message = False
+        log_pane.log_stream_manager.showing_no_matches_message = False
+        log_pane.log_filter_manager.get_all_lines = Mock(return_value=["Line 1", "Line 2"])
+        log_pane.log_filter_manager.get_current_filter = Mock(return_value="test")
+        log_pane.log_filter_manager.has_filter = Mock(return_value=True)
+        
+        # Set up RichLogViewer with the necessary methods
+        from DockTUI.ui.widgets.rich_log_viewer import RichLogViewer
+        log_pane.log_display.__class__ = RichLogViewer  # Make isinstance check pass
+        log_pane.log_display.set_filter = Mock()
+        log_pane.log_display.refilter_existing_lines = Mock()
+        log_pane.log_display.visible_lines = []  # No matches
+        
+        # Call _refilter_logs
+        log_pane._refilter_logs()
+        
+        # Should update filter and mark as no matches
+        log_pane.log_display.set_filter.assert_called_once_with("test")
+        log_pane.log_display.refilter_existing_lines.assert_called_once()
+        assert log_pane.log_stream_manager.showing_no_matches_message == True
+        
+    def test_refilter_logs_no_logs(self, log_pane):
+        """Test re-filtering when there are no logs."""
+        # Set up scenario with no logs
+        log_pane.log_stream_manager.showing_no_logs_message = False
+        log_pane.log_filter_manager.get_all_lines = Mock(return_value=[])
+        log_pane._set_log_text = Mock()
+        log_pane.log_queue_processor._get_no_logs_message = Mock(return_value="No logs found")
+        
+        # Call _refilter_logs
+        log_pane._refilter_logs()
+        
+        # Should show no logs message
+        log_pane._set_log_text.assert_called_once_with("No logs found")
+        assert log_pane.log_stream_manager.showing_no_logs_message == True
+        
+    def test_on_marker_added(self, log_pane):
+        """Test handling marker lines being added."""
+        # Mock _append_log_line
+        log_pane._append_log_line = Mock()
+        
+        # Call _on_marker_added
+        marker_lines = ["Line 1", "Line 2", "Line 3"]
+        log_pane._on_marker_added(marker_lines)
+        
+        # Should append each line
+        assert log_pane._append_log_line.call_count == 3
+        log_pane._append_log_line.assert_any_call("Line 1")
+        log_pane._append_log_line.assert_any_call("Line 2")
+        log_pane._append_log_line.assert_any_call("Line 3")
+        
+    def test_handle_status_change_stopped(self, log_pane):
+        """Test handling container status change to stopped."""
+        # Set up current item
+        log_pane.log_state_manager.current_item = ("container", "test_id")
+        log_pane.log_state_manager.current_item_data = {"name": "test_container"}
+        log_pane.log_state_manager.is_container_stopped = Mock(return_value=True)
+        
+        # Mock methods
+        log_pane._clear_logs = Mock()
+        log_pane._set_log_text = Mock()
+        log_pane._start_logs = Mock()
+        
+        # Call _handle_status_change
+        item_data = {"name": "test_container", "status": "exited"}
+        log_pane._handle_status_change(item_data)
+        
+        # Should update header and show stopped message
+        log_pane.log_state_manager.update_header_with_status.assert_called_once_with(
+            "test_container", "exited"
+        )
+        log_pane._set_log_text.assert_called_once_with(
+            "Container 'test_container' stopped. Loading historical logs...\n"
+        )
+        log_pane._start_logs.assert_called_once()
+        
+    def test_handle_status_change_started(self, log_pane):
+        """Test handling container status change to started."""
+        # Set up current item
+        log_pane.log_state_manager.current_item = ("container", "test_id")
+        log_pane.log_state_manager.current_item_data = {"name": "test_container"}
+        log_pane.log_state_manager.is_container_stopped = Mock(return_value=False)
+        
+        # Mock methods
+        log_pane._clear_logs = Mock()
+        log_pane._set_log_text = Mock()
+        log_pane._start_logs = Mock()
+        
+        # Call _handle_status_change
+        item_data = {"name": "test_container", "status": "running"}
+        log_pane._handle_status_change(item_data)
+        
+        # Should update header and show started message
+        log_pane.log_state_manager.update_header_with_status.assert_called_once_with(
+            "test_container", "running"
+        )
+        log_pane._set_log_text.assert_called_once_with(
+            "Container 'test_container' started. Loading logs...\n"
+        )
+        log_pane._start_logs.assert_called_once()
+        
+    def test_start_logs_no_current_item(self, log_pane):
+        """Test starting logs with no current item."""
+        # Set no current item
+        log_pane.log_state_manager.current_item = None
+        
+        # Call _start_logs
+        log_pane._start_logs()
+        
+        # Should not start streaming
+        log_pane.log_stream_manager.start_streaming.assert_not_called()
+        
+    def test_start_logs_manager_not_available(self, log_pane):
+        """Test starting logs when stream manager not available."""
+        # Set current item but manager not available
+        log_pane.log_state_manager.current_item = ("container", "test_id")
+        log_pane.log_stream_manager.is_available = False
+        
+        # Call _start_logs
+        log_pane._start_logs()
+        
+        # Should not start streaming
+        log_pane.log_stream_manager.start_streaming.assert_not_called()
+        
+    def test_update_selection_network_type(self, log_pane):
+        """Test update_selection for network type (no logs)."""
+        # Mock dependencies
+        log_pane.log_state_manager.save_dropdown_states = Mock(return_value={})
+        log_pane.log_state_manager.restore_dropdown_states = Mock()
+        log_pane.log_state_manager.update_header_for_item = Mock(return_value=False)  # No logs
+        log_pane._show_no_logs_message_for_item_type = Mock()
+        log_pane.call_after_refresh = Mock()
+        
+        # Call update_selection with network
+        log_pane.update_selection("network", "bridge", {"name": "bridge"})
+        
+        # Should show no logs message for networks
+        log_pane._show_no_logs_message_for_item_type.assert_called_once_with("Networks")
+        
+    def test_update_selection_image_type(self, log_pane):
+        """Test update_selection for image type (no logs)."""
+        # Mock dependencies
+        log_pane.log_state_manager.save_dropdown_states = Mock(return_value={})
+        log_pane.log_state_manager.restore_dropdown_states = Mock()
+        log_pane.log_state_manager.update_header_for_item = Mock(return_value=False)  # No logs
+        log_pane._show_no_logs_message_for_item_type = Mock()
+        log_pane.call_after_refresh = Mock()
+        
+        # Call update_selection with image
+        log_pane.update_selection("image", "ubuntu:latest", {"name": "ubuntu"})
+        
+        # Should show no logs message for images
+        log_pane._show_no_logs_message_for_item_type.assert_called_once_with("Images")
+        
+    def test_update_selection_volume_type(self, log_pane):
+        """Test update_selection for volume type (no logs)."""
+        # Mock dependencies
+        log_pane.log_state_manager.save_dropdown_states = Mock(return_value={})
+        log_pane.log_state_manager.restore_dropdown_states = Mock()
+        log_pane.log_state_manager.update_header_for_item = Mock(return_value=False)  # No logs
+        log_pane._show_no_logs_message_for_item_type = Mock()
+        log_pane.call_after_refresh = Mock()
+        
+        # Call update_selection with volume
+        log_pane.update_selection("volume", "data_volume", {"name": "data_volume"})
+        
+        # Should show no logs message for volumes  
+        log_pane._show_no_logs_message_for_item_type.assert_called_once_with("Volumes")
