@@ -81,6 +81,38 @@ if ! docker info &> /dev/null; then
     exit 1
 fi
 
+# Detect OS and set Docker socket path accordingly
+DOCKER_SOCKET="/var/run/docker.sock"
+if [[ "$(uname)" == "Darwin" ]]; then
+    # macOS - Check for various Docker socket locations
+    if [[ -S "$HOME/.colima/default/docker.sock" ]]; then
+        # Colima socket location
+        DOCKER_SOCKET="$HOME/.colima/default/docker.sock"
+    elif [[ -S "$HOME/.colima/docker.sock" ]]; then
+        # Alternative Colima socket location
+        DOCKER_SOCKET="$HOME/.colima/docker.sock"
+    elif [[ -S "$HOME/.docker/run/docker.sock" ]]; then
+        # Docker Desktop socket location
+        DOCKER_SOCKET="$HOME/.docker/run/docker.sock"
+    elif [[ -S "/var/run/docker.sock" ]]; then
+        # Standard location (often a symlink)
+        DOCKER_SOCKET="/var/run/docker.sock"
+    elif [[ -S "/var/run/docker.sock.raw" ]]; then
+        # Some macOS versions use .raw socket
+        DOCKER_SOCKET="/var/run/docker.sock.raw"
+    else
+        echo -e "${RED}Error: Cannot find Docker socket. Is Docker daemon running?${NC}"
+        echo -e "${YELLOW}Tip: Check that your Docker daemon is running (Colima, etc.)${NC}"
+        exit 1
+    fi
+fi
+
+# Verify socket exists and is accessible
+if [[ ! -S "$DOCKER_SOCKET" ]]; then
+    echo -e "${RED}Error: Docker socket not found at $DOCKER_SOCKET${NC}"
+    exit 1
+fi
+
 # Pull the image if update requested or image doesn't exist
 if [[ "$UPDATE" == true ]] || ! docker image inspect "$IMAGE_NAME" &> /dev/null 2>&1; then
     echo -e "${GREEN}Pulling DockTUI image from Docker Hub...${NC}"
@@ -110,7 +142,7 @@ docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
 DOCKER_CMD="docker run --rm"
 DOCKER_CMD="$DOCKER_CMD --name $CONTAINER_NAME"
 DOCKER_CMD="$DOCKER_CMD -it"  # Interactive and TTY for terminal UI
-DOCKER_CMD="$DOCKER_CMD -v /var/run/docker.sock:/var/run/docker.sock"  # Docker socket
+DOCKER_CMD="$DOCKER_CMD -v $DOCKER_SOCKET:/var/run/docker.sock"  # Docker socket
 DOCKER_CMD="$DOCKER_CMD -v /:/host:ro"  # Mount entire filesystem read-only for compose files
 DOCKER_CMD="$DOCKER_CMD -v $HOME:$HOME:ro"  # Mount home directory for better compatibility
 DOCKER_CMD="$DOCKER_CMD -w /host$(pwd)"  # Set working directory to current directory
@@ -128,12 +160,17 @@ if [[ "$DEBUG_MODE" == true ]]; then
     echo -e "${YELLOW}Debug mode enabled. Logs will be written to: $LOG_DIR${NC}"
 fi
 
-# Add user/group mapping for proper file permissions
-DOCKER_CMD="$DOCKER_CMD --user $(id -u):$(id -g)"
-
-# Add Docker group if available (for socket access)
-if getent group docker &>/dev/null; then
-    DOCKER_CMD="$DOCKER_CMD --group-add $(getent group docker | cut -d: -f3)"
+# Handle user permissions based on OS
+if [[ "$(uname)" == "Darwin" ]]; then
+    # On macOS, run as root to access Docker socket
+    DOCKER_CMD="$DOCKER_CMD --user root"
+else
+    # On Linux, use host user for proper file permissions
+    DOCKER_CMD="$DOCKER_CMD --user $(id -u):$(id -g)"
+    # Add Docker group if available (for socket access)
+    if getent group docker &>/dev/null; then
+        DOCKER_CMD="$DOCKER_CMD --group-add $(getent group docker | cut -d: -f3)"
+    fi
 fi
 
 # Add clipboard support through file sharing
