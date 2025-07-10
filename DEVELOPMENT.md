@@ -126,16 +126,29 @@ DockTUI/
 - Docker Engine installed and running
 - Poetry (Python package manager)
 
-### Setting Up Development Environment
+### Quick Start for Development
 
 ```bash
 # Clone the repository
 git clone https://github.com/dialmaster/DockTUI.git
 cd DockTUI
 
+# Run in development mode (automatically handles Poetry setup)
+./scripts-dev/start-dev.sh
+```
+
+The `scripts-dev/start-dev.sh` script automatically:
+- Checks for Poetry installation
+- Installs dependencies
+- Runs DockTUI in the local Python environment
+
+### Manual Development Setup
+
+```bash
+# Install Poetry if not already installed
+pip install poetry
+
 # Install dependencies
-make install
-# or
 poetry install
 
 # Install pre-commit hooks (recommended)
@@ -143,22 +156,48 @@ poetry run pre-commit install
 
 # Activate the virtual environment
 poetry shell
+
+# Run DockTUI
+python -m DockTUI
 ```
 
 ### Running in Development
 
 ```bash
-# Run normally
+# Using scripts-dev/start-dev.sh
+./scripts-dev/start-dev.sh           # Run normally
+./scripts-dev/start-dev.sh -d        # Run with debug logging
+./scripts-dev/start-dev.sh -h        # Show help
+
+# Or manually after poetry shell
 python -m DockTUI
 
-# Run with debug logging
+# With debug logging
 export DOCKTUI_DEBUG=1
 python -m DockTUI
-# or
-./start.sh -d
 ```
 
 Debug logs are written to `./logs/DockTUI_debug.log`.
+
+### Testing Docker Builds Locally
+
+To test your changes in a Docker container before pushing:
+
+```bash
+# Build local Docker image
+./scripts-dev/build-local.sh
+
+# Run the locally built image
+./scripts-dev/start-local.sh
+./scripts-dev/start-local.sh -d  # With debug logging
+```
+
+### Development Scripts
+
+All development scripts are in the `scripts-dev/` directory:
+- `start-dev.sh` - Run DockTUI with Poetry (Python environment)
+- `build-local.sh` - Build Docker image locally for testing
+- `start-local.sh` - Run the locally built Docker image
 
 ## Code Quality and Testing
 

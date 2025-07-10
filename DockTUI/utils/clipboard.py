@@ -17,6 +17,17 @@ def copy_to_clipboard_sync(text):
         "yes",
     ]
 
+    # Check for clipboard file mount FIRST (container preferred method)
+    clipboard_file = os.environ.get("DOCKTUI_CLIPBOARD_FILE")
+    if clipboard_file and in_container:
+        try:
+            with open(clipboard_file, "w") as f:
+                f.write(text)
+            logger.info(f"Wrote to clipboard file: {clipboard_file}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to write to clipboard file {clipboard_file}: {e}")
+
     # If not in container, try pyperclip first (local environments)
     if not in_container:
         try:
@@ -46,9 +57,8 @@ def copy_to_clipboard_sync(text):
     except Exception as e:
         logger.debug(f"xclip failed: {e}")
 
-    # Check for clipboard file mount (container alternative)
-    clipboard_file = os.environ.get("DOCKTUI_CLIPBOARD_FILE")
-    if clipboard_file:
+    # Try clipboard file as fallback even if not in container
+    if clipboard_file and not in_container:
         try:
             with open(clipboard_file, "w") as f:
                 f.write(text)
