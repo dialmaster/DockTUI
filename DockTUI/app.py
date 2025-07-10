@@ -1,4 +1,5 @@
 import logging
+from importlib import metadata
 from typing import Dict, Iterable, Optional, Tuple, Union
 
 from textual.app import App, ComposeResult, SystemCommand
@@ -41,6 +42,32 @@ class DockTUIApp(App, DockerActions, RefreshActions):
 
     # Ensure command palette is enabled
     ENABLE_COMMAND_PALETTE = True
+
+    @property
+    def TITLE(self):
+        """Get the application title with version."""
+        return self._get_versioned_title()
+
+    SUB_TITLE = ""  # No subtitle needed
+
+    def _get_versioned_title(self, suffix=""):
+        """Get the application title with version and optional suffix.
+
+        Args:
+            suffix: Optional string to append after the version
+
+        Returns:
+            str: Title with version and optional suffix
+        """
+        try:
+            version = metadata.version("DockTUI")
+            base_title = f"DockTUI v{version}"
+        except Exception:
+            base_title = "DockTUI"
+
+        if suffix:
+            return f"{base_title} - {suffix}"
+        return base_title
 
     CSS = """
     /* Remove generic container styling that might affect command palette */
@@ -236,7 +263,7 @@ class DockTUIApp(App, DockerActions, RefreshActions):
         Initializes the container list, error display, and starts the auto-refresh timer.
         """
         try:
-            self.title = "DockTUI"
+            self.title = self._get_versioned_title()
             # Get references to our widgets after they're mounted using IDs
             self.container_list = self.query_one("#containers", ContainerList)
             self.log_pane = self.query_one("#log-pane", LogPane)
