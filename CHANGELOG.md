@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3](https://github.com/dialmaster/DockTUI/compare/v0.2.2...v0.2.3) (2025-07-10)
+
+
+### Features
+
+* add version display to application header ([7c5a383](https://github.com/dialmaster/DockTUI/commit/7c5a3838345138d3ad6b6269184e426cdb7e334f))
+* add version display to application header ([f135c28](https://github.com/dialmaster/DockTUI/commit/f135c28c200b74fdf1d73a60abe9033b5debaef8))
+
+
+### Bug Fixes
+
+* remove redundant python checks in workflows ([657abad](https://github.com/dialmaster/DockTUI/commit/657abadda0c6b778e58c8aa6f147ee2a9ec4848f))
+
 ## [0.2.2](https://github.com/dialmaster/DockTUI/compare/v0.2.1...v0.2.2) (2025-07-10)
 
 
