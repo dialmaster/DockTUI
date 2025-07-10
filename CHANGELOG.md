@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2](https://github.com/dialmaster/DockTUI/compare/v0.2.1...v0.2.2) (2025-07-10)
+
+
+### Features
+
+* dockerize app ([4bb7420](https://github.com/dialmaster/DockTUI/commit/4bb7420cd2d02cc4cdaae9e64a80e1dcfa110e1e))
+* dockerize app ([39b7a3f](https://github.com/dialmaster/DockTUI/commit/39b7a3ffe44d77ea462f2d4e443f21c938002f3a))
+
 ## [0.2.1](https://github.com/dialmaster/DockTUI/compare/v0.2.0...v0.2.1) (2025-07-10)
 
 
