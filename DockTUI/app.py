@@ -63,7 +63,13 @@ class DockTUIApp(App, DockerActions, RefreshActions):
             version = metadata.version("DockTUI")
             base_title = f"DockTUI v{version}"
         except Exception:
-            base_title = "DockTUI"
+            # Fall back to __version__ from __init__.py
+            try:
+                from DockTUI import __version__
+
+                base_title = f"DockTUI v{__version__}"
+            except Exception:
+                base_title = "DockTUI"
 
         if suffix:
             return f"{base_title} - {suffix}"
