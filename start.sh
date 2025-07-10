@@ -16,6 +16,7 @@ DEBUG_MODE=false
 UPDATE=false
 VERSION="latest"
 HELP=false
+SKIP_TESTS=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -33,6 +34,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -h|--help)
             HELP=true
+            shift
+            ;;
+        --skip-tests)
+            SKIP_TESTS=true
             shift
             ;;
         *)
@@ -54,6 +59,7 @@ if [[ "$HELP" == true ]]; then
     echo "  -u, --update          Force pull the latest image"
     echo "  -v, --version TAG     Use specific version tag (default: latest)"
     echo "  -h, --help            Show this help message"
+    echo "  --skip-tests          Skip Docker socket connectivity tests"
     echo ""
     echo "Examples:"
     echo "  $0                    # Run latest version"
@@ -150,15 +156,12 @@ DOCKER_CMD="$DOCKER_CMD -it"  # Interactive and TTY for terminal UI
 
 # Handle Docker socket mounting based on OS
 if [[ "$(uname)" == "Darwin" ]]; then
-    # macOS - Special handling for Docker Desktop and Colima
-    if [[ "$DOCKER_SOCKET_SOURCE" == "/var/run/docker.sock" ]]; then
-        # Docker Desktop on macOS - use the socket as-is with read-only
-        DOCKER_CMD="$DOCKER_CMD -v /var/run/docker.sock:/var/run/docker.sock:ro"
-    else
-        # Colima or other Docker implementations
-        # Need to mount with rw permissions and ensure socket is accessible
-        DOCKER_CMD="$DOCKER_CMD -v $DOCKER_SOCKET_SOURCE:/var/run/docker.sock:rw"
-        # For Colima, we also need to ensure the socket permissions are correct
+    # macOS - Always mount /var/run/docker.sock (the VM's socket)
+    # This should work for both Docker Desktop and Colima
+    DOCKER_CMD="$DOCKER_CMD -v /var/run/docker.sock:/var/run/docker.sock"
+
+    # For Colima, we also need to ensure the socket permissions are correct
+    if [[ "$DOCKER_SOCKET_SOURCE" =~ \.colima ]]; then
         DOCKER_CMD="$DOCKER_CMD --group-add 0"  # Add root group for socket access
     fi
 else
@@ -227,8 +230,12 @@ DOCKER_CMD="$DOCKER_CMD -e DOCKTUI_CLIPBOARD_FILE=/tmp/clipboard"
 # Show clipboard file info in debug mode only
 if [[ "$DEBUG_MODE" == true ]]; then
     echo -e "${YELLOW}Clipboard file: $CLIPBOARD_FILE${NC}"
-    echo -e "${YELLOW}Docker socket source: $DOCKER_SOCKET_SOURCE${NC}"
-    echo -e "${YELLOW}Docker socket target: $DOCKER_SOCKET${NC}"
+    if [[ "$(uname)" == "Darwin" ]]; then
+        echo -e "${YELLOW}Docker socket detected at: $DOCKER_SOCKET_SOURCE${NC}"
+        echo -e "${YELLOW}Mounting VM socket: /var/run/docker.sock -> /var/run/docker.sock${NC}"
+    else
+        echo -e "${YELLOW}Docker socket: $DOCKER_SOCKET${NC}"
+    fi
     # Test socket connectivity
     if docker version &> /dev/null; then
         echo -e "${GREEN}Host Docker connection: OK${NC}"
@@ -272,6 +279,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Test Docker socket connectivity before running main app
+echo -e "${GREEN}Testing Docker socket connectivity...${NC}"
+TEST_CMD="$DOCKER_CMD --entrypoint /bin/sh"
+if ! $TEST_CMD "$IMAGE_NAME" -c "ls -la /var/run/docker.sock && echo 'Socket found' || echo 'Socket NOT found'"; then
+    echo -e "${RED}Failed to test Docker socket${NC}"
+fi
+
 # Run the container
 echo -e "${GREEN}Starting DockTUI...${NC}"
 if [[ "$DEBUG_MODE" == true ]]; then
@@ -281,6 +295,23 @@ fi
 if ! $DOCKER_CMD "$IMAGE_NAME"; then
     EXIT_CODE=$?
     echo -e "${RED}DockTUI exited with error code: $EXIT_CODE${NC}"
+
+    # Provide helpful error messages for common issues
+    if [[ "$(uname)" == "Darwin" ]]; then
+        echo -e "${YELLOW}Troubleshooting tips for macOS:${NC}"
+        echo -e "${YELLOW}1. Verify Colima is running:${NC}"
+        echo -e "   colima status"
+        echo -e "${YELLOW}2. Check Docker context:${NC}"
+        echo -e "   docker context ls"
+        echo -e "${YELLOW}3. Test Docker from host:${NC}"
+        echo -e "   docker ps"
+        echo -e "${YELLOW}4. Ensure Docker context is set to Colima:${NC}"
+        echo -e "   docker context use colima"
+        echo -e "${YELLOW}5. Try restarting Colima:${NC}"
+        echo -e "   colima stop && colima start"
+        echo -e "${YELLOW}6. If using virtiofs, try sshfs mount type:${NC}"
+        echo -e "   colima stop && colima start --mount-type sshfs"
+    fi
 fi
 
 # Return to normal terminal
