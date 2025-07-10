@@ -5,6 +5,53 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0](https://github.com/dialmaster/DockTUI/compare/v0.1.7...v0.2.0) (2025-07-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* Replace log viewer with rich syntax-highlighted implementation
+
+### Features
+
+* add real-time status indicators for stack and container operations ([6029875](https://github.com/dialmaster/DockTUI/commit/602987544f6eeaa0f8c2299f75d6056be2a43609))
+* add real-time status indicators for stack and container operations ([d8ab068](https://github.com/dialmaster/DockTUI/commit/d8ab0689a773039c6b9fa3e5a9e58a1a2840d319))
+* better image table sorting ([caf1035](https://github.com/dialmaster/DockTUI/commit/caf10356523b81caac08d58d1902024ccff7ebc5))
+* improve status for associations ([8bf51a9](https://github.com/dialmaster/DockTUI/commit/8bf51a9129ddcf29915c9b5dbf4f954a74f3bc40))
+* improve status for associations ([448297d](https://github.com/dialmaster/DockTUI/commit/448297d66e826f236533a8332cb05d5a3584f3b0))
+* optimize log filtering performance and fix log preservation ([bb150e8](https://github.com/dialmaster/DockTUI/commit/bb150e8b889ef5ed4ba778d5610393641f8bb0ea))
+* Replace log viewer with rich syntax-highlighted implementation ([af64f37](https://github.com/dialmaster/DockTUI/commit/af64f370c8135b5369e145346a2d25df16c8ee2f))
+* Status Bar tweaks ([941ce93](https://github.com/dialmaster/DockTUI/commit/941ce938f108e871e6c0a9298c4126083c1654ae))
+
+
+### Bug Fixes
+
+* improved responsiveness of log pane ([a31d679](https://github.com/dialmaster/DockTUI/commit/a31d679f16093f8bd7220fa80cd1f4f7a0ea0579))
+* preserve dropdown focus state during UI updates in log pane ([4094fe0](https://github.com/dialmaster/DockTUI/commit/4094fe0b7d8a726eebc9baaa109fc0e0922cb9fb))
+* preserve dropdown focus state during UI updates in log pane ([858e9c1](https://github.com/dialmaster/DockTUI/commit/858e9c1cfca31243ebb2c0a4e0d18d34520125d7))
+* preserve text selection when new logs are appended ([628d0cc](https://github.com/dialmaster/DockTUI/commit/628d0cc61ae9250ea72820ed92595deba186f227))
+* preserve text selection when new logs are appended ([02cf315](https://github.com/dialmaster/DockTUI/commit/02cf315d7935f215e6329abadb259bf3e20edc1e))
+* restart log streaming after container recreation ([db79071](https://github.com/dialmaster/DockTUI/commit/db79071d2417138e2f5b6d66bc58e37b591f6b38))
+* restart log streaming after container recreation ([ba04ea7](https://github.com/dialmaster/DockTUI/commit/ba04ea7c5c698e155df4b3f5d480d81ac37c026a))
+
+
+### Refactoring
+
+* extract MouseEventHandler from RichLogViewer ([3e2a007](https://github.com/dialmaster/DockTUI/commit/3e2a007a58e7d3bd83a4aa4397bc608078b2cb36))
+
+
+### Tests
+
+* coverage for log formatter ([c3fe306](https://github.com/dialmaster/DockTUI/commit/c3fe306b553863b7c1a3dc1c679925db75faeb33))
+* coverage for log parser ([8334356](https://github.com/dialmaster/DockTUI/commit/8334356b07e02735f0eb1b32ab7843eb9c6f7519))
+* coverage for log selection manager ([6ebf35f](https://github.com/dialmaster/DockTUI/commit/6ebf35f18d9010d026bdf8c046fa837b9eccc6a2))
+* coverage for log stream manager ([85075db](https://github.com/dialmaster/DockTUI/commit/85075db8c301cf3fedaed86d2f4ffc381865b634))
+* coverage for mouse event handler ([0466d3f](https://github.com/dialmaster/DockTUI/commit/0466d3fd5d9c9363232a399278a6db18b10040d8))
+* coverage for rich_log_viewer ([d04cc8c](https://github.com/dialmaster/DockTUI/commit/d04cc8cf2de54fd915229fac6288773eec8f0e3a))
+* coverage for smart highlighter ([0a30938](https://github.com/dialmaster/DockTUI/commit/0a3093806cfa42811e87fa89588f3a9fbb307ec1))
+* coverage for virtual scroll manager ([21b8ac7](https://github.com/dialmaster/DockTUI/commit/21b8ac7b861f4c197a8ba228bc30573fe8cece77))
+* improved coverage for log pane ([5d004f2](https://github.com/dialmaster/DockTUI/commit/5d004f212a2f678f19e825d7cc481791a8dddeca))
+
 ## [0.1.7](https://github.com/dialmaster/DockTUI/compare/v0.1.6...v0.1.7) (2025-06-29)
 
 
