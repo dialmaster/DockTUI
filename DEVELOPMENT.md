@@ -345,6 +345,10 @@ DockTUI uses [release-please](https://github.com/googleapis/release-please) for 
 2. Click "Run workflow" and select the branch (default: main)
 3. Review and merge the generated release PR
 4. Run the workflow again to create the GitHub release and tag
+5. After the tag is created, manually trigger the Docker Publish workflow:
+   - Go to Actions → Docker Publish
+   - Click "Run workflow" and select the branch (default: main)
+   - This publishes the new version to Docker Hub
 
 The release process is fully automated based on conventional commit messages.
 
