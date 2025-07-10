@@ -1,10 +1,7 @@
 name: Docker Publish
 
 on:
-  push:
-    tags:
-      - 'v*'  # Trigger on version tags
-  workflow_dispatch:  # Allow manual trigger
+  workflow_dispatch:  # Manual trigger only
 
 env:
   REGISTRY: docker.io
