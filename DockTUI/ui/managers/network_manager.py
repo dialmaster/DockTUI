@@ -166,6 +166,12 @@ class NetworkManager:
             network_name: Name of the network to select
         """
         if network_name in self.network_headers:
+            # Clear all selections using the shared method
+            self.parent.clear_all_selections()
+
+            # Add 'selected' class to the selected network header
+            self.network_headers[network_name].add_class("selected")
+
             # Clear any previous selection
             self.parent.selected_item = ("network", network_name)
             self.parent.selected_container_data = None

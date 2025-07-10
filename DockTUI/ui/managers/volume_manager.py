@@ -214,6 +214,13 @@ class VolumeManager:
             volume_name: Name of the volume to select
         """
         if volume_name in self.volume_rows and self.volume_table:
+            # Clear all selections using the shared method
+            self.parent.clear_all_selections()
+
+            # Add 'has-selection' class to the volume table
+            if self.volume_table:
+                self.volume_table.add_class("has-selection")
+
             # Clear any previous selection
             self.parent.selected_item = ("volume", volume_name)
             self.parent.selected_container_data = None

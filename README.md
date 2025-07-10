@@ -25,7 +25,7 @@ DockTUI is a terminal user interface (TUI) that provides a real-time dashboard f
 
 ### Prerequisites
 
-- Python 3.8 or higher
+- Python 3.12 or higher
 - Docker Engine installed and running
 - Docker Compose v2 (the `docker compose` command)
 - Unix-like terminal (Linux, macOS, or WSL2 on Windows)

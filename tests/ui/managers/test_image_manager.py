@@ -126,6 +126,7 @@ class TestImageManager(unittest.TestCase):
         # Check table was created and configured
         mock_datatable.assert_called_once_with(
             show_cursor=True,
+            cursor_type="row",
             cursor_foreground_priority=True,
             zebra_stripes=True,
             fixed_rows=0,

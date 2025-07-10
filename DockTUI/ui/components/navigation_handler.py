@@ -159,6 +159,9 @@ class NavigationHandler:
                     self.container_list.footer_formatter.update_footer_with_selection()
                     return
 
+            # Clear all selections first
+            self.container_list.clear_all_selections()
+
             item_type, item_id = self.container_list.selected_item
 
             if (
@@ -166,24 +169,45 @@ class NavigationHandler:
                 and item_id in self.container_list.image_manager.image_rows
             ):
                 if self.container_list.image_manager.images_table:
-                    self.container_list.image_manager.images_table.focus()
+                    table = self.container_list.image_manager.images_table
                     row_index = self.container_list.image_manager.image_rows[item_id]
-                    self.container_list.image_manager.images_table.move_cursor(
-                        row=row_index
-                    )
+
+                    # Restore cursor position
+                    if table.row_count > 0 and row_index < table.row_count:
+                        table.add_class("has-selection")
+                        table.move_cursor(row=row_index)
+
+                    # Only focus if nothing else has focus or if we have focus
+                    if (
+                        not self.container_list.screen
+                        or not self.container_list.screen.focused
+                    ):
+                        table.focus()
+
                 self.container_list.footer_formatter.update_footer_with_selection()
 
             elif item_type == "volume" and item_id in self.container_list.volume_rows:
                 if self.container_list.volume_manager.volume_table:
-                    self.container_list.volume_manager.volume_table.focus()
+                    table = self.container_list.volume_manager.volume_table
                     row_key = self.container_list.volume_rows[item_id]
-                    self.container_list.volume_manager.volume_table.move_cursor(
-                        row=row_key
-                    )
+
+                    # TODO: Implement row-based selection for volumes table
+                    # For now, just move the cursor
+                    table.move_cursor(row=row_key)
+
+                    # Only focus if nothing else has focus or if we have focus
+                    if (
+                        not self.container_list.screen
+                        or not self.container_list.screen.focused
+                    ):
+                        table.focus()
+
                 self.container_list.footer_formatter.update_footer_with_selection()
 
             elif item_type == "stack" and item_id in self.container_list.stack_headers:
                 header = self.container_list.stack_headers[item_id]
+                # Re-apply selected class to header after refresh
+                header.add_class("selected")
                 header.focus()
                 self.container_list.footer_formatter.update_footer_with_selection()
 
@@ -192,6 +216,9 @@ class NavigationHandler:
                 and item_id in self.container_list.container_rows
             ):
                 stack_name, row_idx = self.container_list.container_rows[item_id]
+                logger.debug(
+                    f"Restoring container selection: item_id={item_id}, stack={stack_name}, row_idx={row_idx}"
+                )
                 if stack_name in self.container_list.stack_tables:
                     table = self.container_list.stack_tables[stack_name]
                     header = self.container_list.stack_headers[stack_name]
@@ -201,8 +228,24 @@ class NavigationHandler:
                         table.styles.display = "block"
                         header._update_content()
 
-                    table.focus()
-                    table.move_cursor(row=row_idx)
+                    # Store the selected row for custom rendering
+                    self.container_list.stack_manager._set_row_selection(table, item_id)
+                    logger.debug(
+                        f"Stored selected row for container {item_id} in stack {stack_name}"
+                    )
+
+                    # Also add has-selection class and move cursor
+                    table.add_class("has-selection")
+                    if table.row_count > 0 and row_idx < table.row_count:
+                        table.move_cursor(row=row_idx)
+
+                    # Only focus if nothing else has focus or if we have focus
+                    if (
+                        not self.container_list.screen
+                        or not self.container_list.screen.focused
+                    ):
+                        table.focus()
+
                     self.container_list.footer_formatter.update_footer_with_selection()
         except Exception as e:
             logger.error(f"Error restoring selection: {str(e)}", exc_info=True)

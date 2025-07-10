@@ -14,6 +14,7 @@ class LogFilter:
         self.max_lines = max_lines
         self.all_log_lines: Deque[str] = deque(maxlen=max_lines)
         self.search_filter = ""
+        self._search_filter_lower = ""  # Cached lowercase version
         self.filtered_line_count = 0
         self.marker_pattern = "------ MARKED "
         self.pending_marker_context = 0  # Track lines to show after a marker
@@ -48,6 +49,9 @@ class LogFilter:
             search_filter: The search string to filter logs
         """
         self.search_filter = search_filter.strip()
+        self._search_filter_lower = (
+            self.search_filter.lower()
+        )  # Cache lowercase version
 
     def get_filtered_lines(self) -> List[str]:
         """Get all log lines that match the current filter.
@@ -57,30 +61,31 @@ class LogFilter:
         """
         self.filtered_line_count = 0
         filtered_lines = []
-        marker_indices = []
 
-        # First pass: find all marker lines and lines that match the filter
-        for i, line in enumerate(self.all_log_lines):
-            if self.marker_pattern in line:
-                marker_indices.append(i)
+        # If no filter, return all lines
+        if not self.search_filter:
+            self.filtered_line_count = len(self.all_log_lines)
+            return list(self.all_log_lines)
 
-        # Second pass: build the filtered list
+        # Single pass: find markers and filter lines
+        marker_positions = []
+
         for i, line in enumerate(self.all_log_lines):
+            # Check if it's a marker line
+            is_marker = self.marker_pattern in line
+            if is_marker:
+                marker_positions.append(i)
+
             # Check if this line should be included
             should_include = False
 
-            # Always include if no filter
-            if not self.search_filter:
+            if is_marker:
                 should_include = True
-            # Include if matches filter
-            elif self.search_filter.lower() in line.lower():
+            elif self._search_filter_lower in line.lower():
                 should_include = True
-            # Include if it's a marker line
-            elif self.marker_pattern in line:
-                should_include = True
-            # Include if it's within 2 lines of a marker
             else:
-                for marker_idx in marker_indices:
+                # Check if within 2 lines of any marker we've found so far
+                for marker_idx in marker_positions:
                     if abs(i - marker_idx) <= 2:
                         should_include = True
                         break
@@ -88,6 +93,27 @@ class LogFilter:
             if should_include:
                 filtered_lines.append(line)
                 self.filtered_line_count += 1
+
+        # Second pass for lines that come before markers (look ahead)
+        # This is more efficient than the previous implementation
+        if marker_positions:
+            # Check lines that come right before the first few markers
+            for marker_idx in marker_positions:
+                for offset in range(1, 3):  # Check 2 lines before each marker
+                    line_idx = marker_idx - offset
+                    if line_idx >= 0 and line_idx < len(self.all_log_lines):
+                        line = self.all_log_lines[line_idx]
+                        # Only add if not already included
+                        if line not in filtered_lines:
+                            # Insert at the correct position
+                            insert_pos = 0
+                            for j, existing_line in enumerate(filtered_lines):
+                                if self.all_log_lines.index(existing_line) > line_idx:
+                                    insert_pos = j
+                                    break
+                                insert_pos = j + 1
+                            filtered_lines.insert(insert_pos, line)
+                            self.filtered_line_count += 1
 
         return filtered_lines
 
@@ -105,7 +131,7 @@ class LogFilter:
         # Always show marker lines
         if self.marker_pattern in line:
             return True
-        return self.search_filter.lower() in line.lower()
+        return self._search_filter_lower in line.lower()
 
     def should_show_line_with_context(self, line: str) -> bool:
         """Check if a line should be shown considering marker context.
@@ -129,11 +155,13 @@ class LogFilter:
             return True
 
         # Check if we need to show lines before a marker
-        # Look ahead in the last few lines to see if a marker is coming
-        recent_lines = list(self.all_log_lines)[-3:]  # Last 3 lines
-        for recent_line in recent_lines:
-            if self.marker_pattern in recent_line:
-                return True
+        # More efficient: check last 3 lines without creating new list
+        line_count = len(self.all_log_lines)
+        if line_count >= 1:
+            start_idx = max(0, line_count - 3)
+            for i in range(start_idx, line_count):
+                if self.marker_pattern in self.all_log_lines[i]:
+                    return True
 
         # Otherwise use normal filter
         return self.matches_filter(line)
@@ -161,3 +189,11 @@ class LogFilter:
             True if a filter is set, False otherwise
         """
         return bool(self.search_filter)
+
+    def get_all_lines(self) -> List[str]:
+        """Get all stored log lines.
+
+        Returns:
+            List of all stored log lines
+        """
+        return list(self.all_log_lines)
