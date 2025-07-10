@@ -34,10 +34,7 @@ DockTUI is a terminal user interface (TUI) that provides a real-time dashboard f
 ### Quick Start
 
 ```bash
-# Option 1: Run directly (no clone needed)
-curl -sSL https://raw.githubusercontent.com/dialmaster/DockTUI/main/start.sh | bash
-
-# Option 2: Clone and run
+# Clone and run
 git clone https://github.com/dialmaster/DockTUI.git
 cd DockTUI
 ./start.sh
