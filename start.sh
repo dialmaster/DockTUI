@@ -83,32 +83,42 @@ fi
 
 # Detect OS and set Docker socket path accordingly
 DOCKER_SOCKET="/var/run/docker.sock"
+DOCKER_SOCKET_SOURCE=""  # Track the actual source socket for macOS
 if [[ "$(uname)" == "Darwin" ]]; then
     # macOS - Check for various Docker socket locations
     if [[ -S "$HOME/.colima/default/docker.sock" ]]; then
         # Colima socket location
-        DOCKER_SOCKET="$HOME/.colima/default/docker.sock"
+        DOCKER_SOCKET_SOURCE="$HOME/.colima/default/docker.sock"
+        DOCKER_SOCKET="/var/run/docker.sock"
     elif [[ -S "$HOME/.colima/docker.sock" ]]; then
         # Alternative Colima socket location
-        DOCKER_SOCKET="$HOME/.colima/docker.sock"
+        DOCKER_SOCKET_SOURCE="$HOME/.colima/docker.sock"
+        DOCKER_SOCKET="/var/run/docker.sock"
     elif [[ -S "$HOME/.docker/run/docker.sock" ]]; then
         # Docker Desktop socket location
-        DOCKER_SOCKET="$HOME/.docker/run/docker.sock"
-    elif [[ -S "/var/run/docker.sock" ]]; then
-        # Standard location (often a symlink)
+        DOCKER_SOCKET_SOURCE="$HOME/.docker/run/docker.sock"
         DOCKER_SOCKET="/var/run/docker.sock"
-    elif [[ -S "/var/run/docker.sock.raw" ]]; then
-        # Some macOS versions use .raw socket
-        DOCKER_SOCKET="/var/run/docker.sock.raw"
+    elif [[ -S "/var/run/docker.sock" ]]; then
+        # Standard location (often a symlink on macOS)
+        # For Docker Desktop on macOS, we need to use the special mount
+        DOCKER_SOCKET_SOURCE="/var/run/docker.sock"
+        DOCKER_SOCKET="/var/run/docker.sock"
     else
         echo -e "${RED}Error: Cannot find Docker socket. Is Docker daemon running?${NC}"
-        echo -e "${YELLOW}Tip: Check that your Docker daemon is running (Colima, etc.)${NC}"
+        echo -e "${YELLOW}Tip: For Docker Desktop, make sure it's running.${NC}"
+        echo -e "${YELLOW}     For Colima, run: colima status${NC}"
         exit 1
     fi
+else
+    # Linux/WSL - Use standard socket location
+    DOCKER_SOCKET_SOURCE="/var/run/docker.sock"
 fi
 
 # Verify socket exists and is accessible
-if [[ ! -S "$DOCKER_SOCKET" ]]; then
+if [[ -n "$DOCKER_SOCKET_SOURCE" ]] && [[ ! -S "$DOCKER_SOCKET_SOURCE" ]]; then
+    echo -e "${RED}Error: Docker socket not found at $DOCKER_SOCKET_SOURCE${NC}"
+    exit 1
+elif [[ -z "$DOCKER_SOCKET_SOURCE" ]] && [[ ! -S "$DOCKER_SOCKET" ]]; then
     echo -e "${RED}Error: Docker socket not found at $DOCKER_SOCKET${NC}"
     exit 1
 fi
@@ -142,7 +152,22 @@ docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
 DOCKER_CMD="docker run --rm"
 DOCKER_CMD="$DOCKER_CMD --name $CONTAINER_NAME"
 DOCKER_CMD="$DOCKER_CMD -it"  # Interactive and TTY for terminal UI
-DOCKER_CMD="$DOCKER_CMD -v $DOCKER_SOCKET:/var/run/docker.sock"  # Docker socket
+
+# Handle Docker socket mounting based on OS
+if [[ "$(uname)" == "Darwin" ]]; then
+    # macOS - Special handling for Docker Desktop
+    if [[ "$DOCKER_SOCKET_SOURCE" == "/var/run/docker.sock" ]]; then
+        # Docker Desktop on macOS - use the socket as-is
+        DOCKER_CMD="$DOCKER_CMD -v /var/run/docker.sock:/var/run/docker.sock:ro"
+    else
+        # Colima or other Docker implementations
+        DOCKER_CMD="$DOCKER_CMD -v $DOCKER_SOCKET_SOURCE:/var/run/docker.sock"
+    fi
+else
+    # Linux/WSL - Standard socket mounting
+    DOCKER_CMD="$DOCKER_CMD -v $DOCKER_SOCKET:/var/run/docker.sock"
+fi
+
 DOCKER_CMD="$DOCKER_CMD -v /:/host:ro"  # Mount entire filesystem read-only for compose files
 DOCKER_CMD="$DOCKER_CMD -v $HOME:$HOME:ro"  # Mount home directory for better compatibility
 DOCKER_CMD="$DOCKER_CMD -w /host$(pwd)"  # Set working directory to current directory
@@ -164,6 +189,11 @@ fi
 if [[ "$(uname)" == "Darwin" ]]; then
     # On macOS, run as root to access Docker socket
     DOCKER_CMD="$DOCKER_CMD --user root"
+    # Add privileged flag for Docker Desktop socket access on macOS
+    if [[ "$DOCKER_SOCKET_SOURCE" == "/var/run/docker.sock" ]] || [[ "$DOCKER_SOCKET_SOURCE" == "$HOME/.docker/run/docker.sock" ]]; then
+        DOCKER_CMD="$DOCKER_CMD --privileged"
+        echo -e "${YELLOW}Note: Using privileged mode for Docker Desktop socket access${NC}"
+    fi
 else
     # On Linux, use host user for proper file permissions
     DOCKER_CMD="$DOCKER_CMD --user $(id -u):$(id -g)"
@@ -183,6 +213,14 @@ DOCKER_CMD="$DOCKER_CMD -e DOCKTUI_CLIPBOARD_FILE=/tmp/clipboard"
 # Show clipboard file info in debug mode only
 if [[ "$DEBUG_MODE" == true ]]; then
     echo -e "${YELLOW}Clipboard file: $CLIPBOARD_FILE${NC}"
+    echo -e "${YELLOW}Docker socket source: $DOCKER_SOCKET_SOURCE${NC}"
+    echo -e "${YELLOW}Docker socket target: $DOCKER_SOCKET${NC}"
+    # Test socket connectivity
+    if docker version &> /dev/null; then
+        echo -e "${GREEN}Host Docker connection: OK${NC}"
+    else
+        echo -e "${RED}Host Docker connection: FAILED${NC}"
+    fi
 fi
 
 # Start clipboard monitor in background
