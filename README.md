@@ -15,7 +15,7 @@ DockTUI is a terminal user interface (TUI) that provides a real-time dashboard f
 
 - 📊 **Real-time Monitoring** - Live updates of container status, CPU, memory, and resource usage
 - 🎯 **Docker Compose Support** - Organized view of containers grouped by Compose stacks
-- 📜 **Interactive Log Viewer** - Stream logs with filtering, text selection, and clipboard support
+- 📜 **Rich Log Viewer** - Advanced log viewing with syntax highlighting, JSON/XML expansion, and smart pattern detection
 - ⚡ **Quick Actions** - Start, stop, restart, recreate containers and stacks with keyboard shortcuts
 - 🗂️ **Resource Management** - Manage images, volumes, and networks with usage tracking
 - 🎨 **Clean Interface** - Intuitive terminal UI with collapsible sections and status bar
@@ -97,11 +97,28 @@ poetry run DockTUI
 
 ### Log Viewer
 
+#### Rich Syntax Highlighting
+- Automatic detection and highlighting of:
+  - Timestamps in various formats
+  - Log levels (ERROR, WARN, INFO, DEBUG, TRACE) with color coding
+  - Network data (IP addresses, ports, MAC addresses)
+  - URLs and file paths
+  - UUIDs and Kubernetes resources
+  - HTTP methods and status codes
+  - Code snippets with language-specific syntax highlighting
+
+#### Interactive Features
 - **Click and drag** to select text
-- **Right-click** to copy selection
+- **Double-click** on JSON/XML lines to expand/collapse pretty-printed views
 - **Filter box** to search logs in real-time
 - **Auto-follow** checkbox to toggle automatic scrolling
 - **Mark Log Position** - Add timestamped markers to track important events
+
+#### Performance Optimizations
+- Virtual scrolling for handling massive log files
+- Lazy parsing - lines are only processed when visible
+- Background pre-parsing of upcoming lines for smooth scrolling
+- Configurable memory limits to prevent excessive resource usage
 
 ### Volume Management
 
@@ -137,9 +154,15 @@ log:
 
 ### Performance Tuning
 
+The log viewer uses advanced optimization techniques:
+- **Virtual scrolling** - Only renders visible lines for smooth performance
+- **Lazy parsing** - Processes log lines on-demand as you scroll
+- **Background pre-loading** - Prepares upcoming lines before you reach them
+
 For containers with lots of logs:
 - **Faster loading**: Use smaller `tail` (e.g., 100) and `since` (e.g., '5m')
 - **More history**: Increase `tail` (e.g., 1000) and `since` (e.g., '1h')
+- **Memory limit**: Adjust `max_lines` to control memory usage (default: 4000)
 
 ### Environment Variables
 
