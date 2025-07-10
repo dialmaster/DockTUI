@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4](https://github.com/dialmaster/DockTUI/compare/v0.2.3...v0.2.4) (2025-07-10)
+
+
+### Bug Fixes
+
+* display version when running in docker ([62568d9](https://github.com/dialmaster/DockTUI/commit/62568d95df940367c9b4336b8162ebec85b23d21))
+* display version when running in docker ([d6ce0f2](https://github.com/dialmaster/DockTUI/commit/d6ce0f257ee1d7b763cf2d1d62639a7d12b22903))
+
 ## [0.2.3](https://github.com/dialmaster/DockTUI/compare/v0.2.2...v0.2.3) (2025-07-10)
 
 
