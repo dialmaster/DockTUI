@@ -25,6 +25,7 @@ class MockDockTUIApp(RefreshActions):
         self.docker.last_error = None  # Set to None instead of Mock
         self.log_pane = Mock()
         self.title = "DockTUI"
+        self.sub_title = ""
         self._worker_called = False
         self._worker_callback = None
         # Store the real implementation
@@ -40,6 +41,12 @@ class MockDockTUIApp(RefreshActions):
         """Mock worker method to track calls."""
         self._worker_called = True
         self._worker_callback = callback
+    
+    def _get_versioned_title(self, suffix=""):
+        """Mock implementation of _get_versioned_title."""
+        if suffix:
+            return f"DockTUI - {suffix}"
+        return "DockTUI"
 
 
 class TestRefreshActions:

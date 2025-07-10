@@ -245,7 +245,8 @@ class RefreshActions:
             total_stacks = len(stacks)
 
             # Update the app title with stats (removes any "Refreshing..." suffix)
-            self.title = f"DockTUI - {total_networks} Networks, {total_stacks} Stacks, {total_running} Running, {total_exited} Exited"
+            stats_suffix = f"{total_networks} Networks, {total_stacks} Stacks, {total_running} Running, {total_exited} Exited"
+            self.title = self._get_versioned_title(stats_suffix)
             self.sub_title = ""
             # Increment refresh count
             self._refresh_count += 1

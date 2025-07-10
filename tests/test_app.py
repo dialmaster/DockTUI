@@ -147,9 +147,13 @@ class TestDockTUIApp:
         mock_status_bar.assert_called_once()
         mock_footer.assert_called_once()
 
+    @patch("DockTUI.app.metadata")
     @patch("DockTUI.app.config")
-    def test_on_mount(self, mock_config):
+    def test_on_mount(self, mock_config, mock_metadata):
         """Test on_mount event handler."""
+        # Mock the version to a fixed value for testing
+        mock_metadata.version.return_value = "0.2.0"
+        
         app = DockTUIApp.__new__(DockTUIApp)
         # Initialize attributes that would normally be set by __init__
         app.container_list = None
@@ -193,8 +197,8 @@ class TestDockTUIApp:
             # Call on_mount
             app.on_mount()
 
-            # Verify title was set
-            mock_title.assert_called_with("DockTUI")
+            # Verify title was set (now includes version)
+            mock_title.assert_called_with("DockTUI v0.2.0")
 
         # Verify widgets were queried and stored
         assert app.container_list == mock_container_list
