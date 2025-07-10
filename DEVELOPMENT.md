@@ -9,11 +9,12 @@ DockTUI is built using Python with the following core components:
 ### UI Layer (Textual)
 - Main dashboard view with collapsible stack sections
 - Container detail rows with resource usage information
-- Split-pane log viewer with real-time streaming
+- Rich log viewer with syntax highlighting and smart formatting
 - Status bar for selection information
 - Error display for showing error messages
 - Interactive controls for log filtering and auto-follow
 - Modal dialogs for actions and confirmations
+- JSON/XML expansion support for structured data viewing
 
 ### Docker Integration Layer (docker-py SDK)
 - Direct SDK integration without Docker CLI dependency
@@ -51,10 +52,16 @@ Docker Engine <-> docker-py SDK <-> DockerManager (with threading) <-> UI Compon
   - Thread-based non-blocking container operations
   - Parallel stats collection for all containers
   - Multi-stream log aggregation for stacks
-- **LogPane** (`DockTUI/ui/viewers/log_pane.py`): Split-pane view with enhanced log streaming:
-  - Real-time filtering with proper empty filter handling
+- **LogPane** (`DockTUI/ui/viewers/log_pane.py`): Advanced real-time log viewer with:
+  - Rich text rendering with smart syntax highlighting
+  - Automatic pattern detection (timestamps, log levels, IPs, URLs, etc.)
+  - JSON/XML expansion support (double-click to expand/collapse)
+  - Virtual scrolling and lazy parsing for performance
+  - Background pre-parsing thread for smooth scrolling
+  - LRU cache for rendered log segments
   - Session-based log streaming to prevent duplicates
-  - Configurable time ranges and tail limits
+  - **Mark Log Position** feature with timestamped markers
+  - Dynamic header showing container state
 - **Action Mixins**: Modular action handling
   - **DockerActions**: Container/stack/volume/image operations with context awareness
   - **RefreshActions**: UI refresh and data update management
@@ -73,6 +80,20 @@ DockTUI/
 │   ├── manager.py            # Core Docker management
 │   ├── log_streamer.py       # Log streaming functionality
 │   └── stats_collector.py    # Concurrent stats collection
+├── models/                    # Data models
+│   └── log_line.py           # LogLine model for structured log representation
+├── services/                  # Service layer for specialized functionality
+│   ├── log_filter.py         # Log filtering with marker support
+│   ├── log_streamer.py       # Log streaming from Docker containers
+│   ├── log_parser.py         # Advanced log parsing with pattern detection
+│   ├── log_formatter.py      # Main log formatting orchestrator
+│   └── log/                  # Log formatting subsystem
+│       ├── highlighter/      # Syntax highlighting components
+│       │   ├── patterns.py   # Comprehensive pattern library
+│       │   ├── smart.py      # Smart formatter with auto-detection
+│       │   └── themes.py     # Color themes for log highlighting
+│       ├── json_formatter.py # JSON pretty-printing and highlighting
+│       └── xml_formatter.py  # XML pretty-printing and highlighting
 ├── ui/                        # UI components organized by function
 │   ├── actions/              # Modular action handlers
 │   ├── base/                 # Base classes and interfaces
@@ -80,11 +101,20 @@ DockTUI/
 │   ├── viewers/              # Content viewers
 │   ├── dialogs/              # Modal dialogs
 │   └── widgets/              # Reusable UI components
+│       ├── rich_log_viewer.py      # Advanced log viewer widget
+│       ├── log_renderer.py         # Log rendering engine
+│       ├── log_selection_manager.py # Text selection handling
+│       ├── mouse_event_handler.py   # Mouse interaction handling
+│       ├── virtual_scroll_manager.py # Virtual scrolling implementation
+│       └── parsing_coordinator.py   # Background parsing coordination
 ├── utils/                     # Utility modules
 │   ├── clipboard.py          # Cross-platform clipboard support
 │   ├── time_utils.py         # Time formatting utilities
 │   ├── formatting.py         # Byte size formatting utilities
-│   └── logging.py            # Debug logging setup
+│   ├── text_processing.py   # Text processing utilities (ANSI stripping)
+│   ├── logging.py            # Debug logging setup
+│   └── mixins/               # Reusable mixins
+│       └── cacheable.py      # Cache invalidation support
 └── config.py                  # Configuration management
 ```
 
@@ -239,6 +269,22 @@ Actions dynamically enable/disable based on selection:
 - Remove container action only available for stopped/exited containers
 - Dynamic footer bindings update based on current selection
 
+#### Lazy Loading and Caching
+Performance optimization strategies:
+- Configuration loaded on-demand to minimize import-time overhead
+- Log lines parsed only when becoming visible
+- LRU cache for rendered log segments in RichLogViewer
+- Singleton pattern for compiled regex patterns
+- Virtual scrolling to handle large log files efficiently
+
+#### Smart Pattern Detection
+Automatic detection and highlighting of:
+- Log formats and levels
+- JSON and XML structures
+- Code snippets with language detection
+- Network addresses and protocols
+- Timestamps in various formats
+
 ## CI/CD
 
 GitHub Actions automatically runs on all pull requests and pushes to main:
@@ -283,10 +329,21 @@ The following environment variables are available for development and debugging:
 
 ### Performance Considerations
 
-- Log viewing performance can be tuned via configuration for different use cases
-- Stats collection is parallelized for efficiency with large numbers of containers
-- Non-blocking operations ensure UI remains responsive
-- Session-based log streaming prevents duplicate messages
+- **Log Viewer Optimizations**:
+  - Virtual scrolling renders only visible lines
+  - Lazy parsing processes lines on-demand
+  - Background thread pre-loads upcoming lines
+  - LRU cache stores rendered segments
+  - Memory limits prevent excessive resource usage
+- **Docker Operations**:
+  - Stats collection parallelized across all containers
+  - Non-blocking operations ensure UI remains responsive
+  - Session-based log streaming prevents duplicate messages
+  - Thread pool manages concurrent operations
+- **Configuration Tuning**:
+  - `log.max_lines` controls memory usage
+  - `log.tail` and `log.since` balance loading speed vs. history
+  - `app.refresh_interval` adjusts CPU usage
 
 ## Debugging Tips
 
