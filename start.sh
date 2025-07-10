@@ -175,6 +175,10 @@ if [[ "$DEBUG_MODE" == true ]]; then
     mkdir -p "$LOG_DIR"
 fi
 
+# Force the Docker host path for clients inside the container
+# This is often necessary for Colima/macOS to resolve the proxied socket correctly.
+DOCKER_CMD="$DOCKER_CMD -e DOCKER_HOST=unix:///var/run/docker.sock"
+
 # Add config file mount if found
 if [[ -n "$CONFIG_FILE" ]]; then
     DOCKER_CMD="$DOCKER_CMD -v $CONFIG_FILE:/config/DockTUI.yaml:ro"
