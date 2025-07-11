@@ -218,19 +218,29 @@ class LogFormatter:
     ) -> List[Segment]:
         """Create segments using basic styling."""
         segments = []
+        has_json = False
+        has_xml = False
 
+        # First pass: check if we have JSON or XML
+        for comp_type, _, _ in components:
+            if comp_type == "json":
+                has_json = True
+            elif comp_type == "xml":
+                has_xml = True
+
+        # Add emoji at the beginning if we have JSON or XML
+        if has_json:
+            segments.append(Segment("📋 ", Style(color="blue")))
+        elif has_xml:
+            segments.append(Segment("📄 ", Style(color="bright_blue")))
+
+        # Now add all the components
         for comp_type, text, _ in components:
             style = self.STYLES.get(comp_type, self.STYLES["text"])
             combined_style = base_style + style
 
-            if comp_type == "json":
-                segments.append(Segment("📋 ", combined_style))
-                segments.append(Segment(text, combined_style))
-            elif comp_type == "json_expanded":
+            if comp_type == "json_expanded":
                 segments.append(Segment(" 📂", Style(color="blue", italic=True)))
-            elif comp_type == "xml":
-                segments.append(Segment("📄 ", combined_style))
-                segments.append(Segment(text, combined_style))
             elif comp_type == "xml_expanded":
                 segments.append(Segment(" 📂", Style(color="bright_blue", italic=True)))
             else:
@@ -271,69 +281,19 @@ class LogFormatter:
     def _insert_json_emoji(
         self, segments: List[Segment], json_pos: Optional[int]
     ) -> List[Segment]:
-        """Insert JSON emoji at the appropriate position."""
-        if json_pos is None:
+        """Insert JSON emoji at the beginning of the line."""
+        if not segments:
             return segments
 
-        result_segments = []
-        current_pos = 0
-        inserted = False
-
-        for segment in segments:
-            seg_len = len(segment.text)
-            seg_end = current_pos + seg_len
-
-            if not inserted and current_pos <= json_pos < seg_end:
-                # Split segment and insert emoji
-                if current_pos < json_pos:
-                    pre_text = segment.text[: json_pos - current_pos]
-                    result_segments.append(Segment(pre_text, segment.style))
-
-                result_segments.append(Segment("📋 ", Style(color="blue")))
-
-                if json_pos - current_pos < seg_len:
-                    post_text = segment.text[json_pos - current_pos :]
-                    result_segments.append(Segment(post_text, segment.style))
-
-                inserted = True
-            else:
-                result_segments.append(segment)
-
-            current_pos = seg_end
-
-        return result_segments
+        # Always insert at the beginning
+        return [Segment("📋 ", Style(color="blue"))] + segments
 
     def _insert_xml_emoji(
         self, segments: List[Segment], xml_pos: Optional[int]
     ) -> List[Segment]:
-        """Insert XML emoji at the appropriate position."""
-        if xml_pos is None:
+        """Insert XML emoji at the beginning of the line."""
+        if not segments:
             return segments
 
-        result_segments = []
-        current_pos = 0
-        inserted = False
-
-        for segment in segments:
-            seg_len = len(segment.text)
-            seg_end = current_pos + seg_len
-
-            if not inserted and current_pos <= xml_pos < seg_end:
-                # Split segment and insert emoji
-                if current_pos < xml_pos:
-                    pre_text = segment.text[: xml_pos - current_pos]
-                    result_segments.append(Segment(pre_text, segment.style))
-
-                result_segments.append(Segment("📄 ", Style(color="bright_blue")))
-
-                if xml_pos - current_pos < seg_len:
-                    post_text = segment.text[xml_pos - current_pos :]
-                    result_segments.append(Segment(post_text, segment.style))
-
-                inserted = True
-            else:
-                result_segments.append(segment)
-
-            current_pos = seg_end
-
-        return result_segments
+        # Always insert at the beginning
+        return [Segment("📄 ", Style(color="bright_blue"))] + segments

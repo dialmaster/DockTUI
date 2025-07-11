@@ -121,6 +121,16 @@ LogPane > Static.log-header {
     margin-top: 0;
     margin-bottom: 0;
 }
+
+.log-footer {
+    height: 2;
+    padding: 0 1;
+    background: $surface-darken-3;
+    color: $text-muted;
+    text-align: center;
+    border-top: solid $primary-darken-3;
+    dock: bottom;
+}
 """
 
 # Dropdown options configuration

@@ -133,6 +133,12 @@ class LogPane(Vertical):
             self.no_selection_display, self.log_display, classes="log-content-container"
         )
 
+        # Footer with instructions
+        yield Static(
+            "📋 Double-click to expand JSON/XML • Click+drag to select • Right-click to copy",
+            classes="log-footer",
+        )
+
     def on_mount(self):
         """Set up the log pane after mounting."""
         # Start the queue processing timer
