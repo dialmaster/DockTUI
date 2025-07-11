@@ -66,6 +66,12 @@ if [[ "$HELP" == true ]]; then
     echo "  $0 -d                 # Run with debug logging"
     echo "  $0 -u                 # Update to latest version"
     echo "  $0 -v 1.0.0          # Run specific version"
+    echo ""
+    echo "Notes for macOS users:"
+    echo "  - For Colima: Ensure 'docker context use colima' is set"
+    echo "  - For Docker Desktop: Should work out of the box"
+    echo "  - Mouse support: If mouse doesn't work in iTerm2, check Preferences > Profiles > Terminal"
+    echo "  - Hold Option/Alt key to temporarily disable mouse reporting for text selection"
     exit 0
 fi
 
@@ -182,6 +188,15 @@ fi
 # This is often necessary for Colima/macOS to resolve the proxied socket correctly.
 DOCKER_CMD="$DOCKER_CMD -e DOCKER_HOST=unix:///var/run/docker.sock"
 
+# Pass TERM environment variable for proper terminal capabilities (including mouse support)
+# This is crucial for mouse events to work properly in terminal applications
+if [[ -n "$TERM" ]]; then
+    DOCKER_CMD="$DOCKER_CMD -e TERM=$TERM"
+else
+    # Fallback to xterm-256color which supports both colors and mouse events
+    DOCKER_CMD="$DOCKER_CMD -e TERM=xterm-256color"
+fi
+
 # Add config file mount if found
 if [[ -n "$CONFIG_FILE" ]]; then
     DOCKER_CMD="$DOCKER_CMD -v $CONFIG_FILE:/config/DockTUI.yaml:ro"
@@ -236,6 +251,7 @@ if [[ "$DEBUG_MODE" == true ]]; then
     else
         echo -e "${YELLOW}Docker socket: $DOCKER_SOCKET${NC}"
     fi
+    echo -e "${YELLOW}Terminal type (TERM): ${TERM:-not set}${NC}"
     # Test socket connectivity
     if docker version &> /dev/null; then
         echo -e "${GREEN}Host Docker connection: OK${NC}"
@@ -311,6 +327,10 @@ if ! $DOCKER_CMD "$IMAGE_NAME"; then
         echo -e "   colima stop && colima start"
         echo -e "${YELLOW}6. If using virtiofs, try sshfs mount type:${NC}"
         echo -e "   colima stop && colima start --mount-type sshfs"
+        echo -e "${YELLOW}7. Mouse not working? Check your terminal:${NC}"
+        echo -e "   - iTerm2: Enable mouse reporting in Preferences > Profiles > Terminal"
+        echo -e "   - Try running: export TERM=xterm-256color"
+        echo -e "   - Hold Option/Alt key while clicking to bypass mouse reporting"
     fi
 fi
 
