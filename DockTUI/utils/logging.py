@@ -22,7 +22,9 @@ def setup_logging():
         logging.getLogger().setLevel(logging.CRITICAL)
         return None
 
-    log_dir = Path("./logs")
+    # Use DOCKTUI_LOG_DIR if set, otherwise use ./logs
+    log_dir_path = os.environ.get("DOCKTUI_LOG_DIR", "./logs")
+    log_dir = Path(log_dir_path)
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "DockTUI.log"
 

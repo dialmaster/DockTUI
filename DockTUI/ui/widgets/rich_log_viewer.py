@@ -301,6 +301,9 @@ class RichLogViewer(ScrollView):
             # Check if this is a marked line (quick check without full parsing)
             if "------ MARKED" in text and "------" in text:
                 log_line.is_marked = True
+                is_marker = True
+            else:
+                is_marker = False
 
             # Add to storage
             self.log_lines.append(log_line)
@@ -321,19 +324,33 @@ class RichLogViewer(ScrollView):
                 self.visible_lines = [
                     line for line in self.log_lines if self._should_show_line(line)
                 ]
-                self._invalidate_virtual_size()
+                # Use immediate update for markers to ensure auto-follow works correctly
+                if is_marker:
+                    self._invalidate_virtual_size_immediate()
+                else:
+                    self._invalidate_virtual_size()
             else:
                 # Check if it passes filter
                 if self._should_show_line(log_line):
                     self.visible_lines.append(log_line)
-                    self._invalidate_virtual_size()
+                    # Use immediate update for markers to ensure auto-follow works correctly
+                    if is_marker:
+                        self._invalidate_virtual_size_immediate()
+                    else:
+                        self._invalidate_virtual_size()
 
-        # Force refresh to update virtual size before scrolling
-        self.refresh(layout=True)
+        # For markers, we've already done immediate refresh in _invalidate_virtual_size_immediate
+        # For other lines, force refresh to update virtual size before scrolling
+        if not is_marker:
+            self.refresh(layout=True)
 
         # Auto-scroll if enabled - use call_after_refresh to ensure size is updated
         if self.auto_follow:
-            self.call_after_refresh(self.scroll_end)
+            # For markers, use immediate scroll since we've already updated everything
+            if is_marker:
+                self.scroll_end(animate=False)
+            else:
+                self.call_after_refresh(self.scroll_end)
 
     def add_log_lines(self, lines: List[str], unfiltered: bool = False) -> None:
         """Add multiple log lines efficiently.
@@ -704,7 +721,12 @@ class RichLogViewer(ScrollView):
                     # Update current_y
                     if line.is_expanded and line.is_parsed:
                         if line.json_data:
-                            current_y += self._count_json_lines(line.json_data)
+                            if hasattr(line, "json_objects") and line.json_objects:
+                                current_y += LogRenderer.count_all_json_lines(
+                                    line.json_objects
+                                )
+                            else:
+                                current_y += self._count_json_lines(line.json_data)
                         elif line.xml_data:
                             current_y += self._count_xml_lines(line.xml_data)
                         else:

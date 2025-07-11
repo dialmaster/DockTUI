@@ -18,9 +18,13 @@ class LogLine(CacheableMixin):
     container_name: Optional[str] = None
     container_prefix_end: Optional[int] = None
     has_json: bool = False
-    json_data: Optional[Dict] = None
-    json_start_pos: Optional[int] = None
+    json_data: Optional[Dict] = None  # First JSON object (for backward compatibility)
+    json_start_pos: Optional[int] = None  # Position of first JSON
     json_end_pos: Optional[int] = None
+    # Support for multiple JSON objects
+    json_objects: List[Tuple[Dict, int, int]] = field(
+        default_factory=list
+    )  # List of (json_data, start_pos, end_pos)
     has_xml: bool = False
     xml_data: Optional[str] = None  # Store as string, not parsed
     xml_start_pos: Optional[int] = None

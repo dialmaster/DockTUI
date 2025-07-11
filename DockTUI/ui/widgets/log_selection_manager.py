@@ -177,7 +177,12 @@ class SelectionManager:
         for log_line in visible_lines:
             # Calculate lines for this log entry
             if log_line.is_expanded and log_line.json_data:
-                line_count = count_json_lines_func(log_line.json_data)
+                if hasattr(log_line, "json_objects") and log_line.json_objects:
+                    from .log_renderer import LogRenderer
+
+                    line_count = LogRenderer.count_all_json_lines(log_line.json_objects)
+                else:
+                    line_count = count_json_lines_func(log_line.json_data)
             elif log_line.is_expanded and log_line.xml_data:
                 line_count = count_xml_lines_func(log_line.xml_data)
             else:
@@ -265,11 +270,35 @@ class SelectionManager:
             return log_line.raw_text
         elif log_line.json_data:
             # JSON sub-line
-            json_lines = json.dumps(log_line.json_data, indent=2).split("\n")
-            if offset - 1 < len(json_lines):
-                return json_lines[offset - 1]
-            else:
+            # Check if we have multiple JSON objects
+            if hasattr(log_line, "json_objects") and log_line.json_objects:
+                # Handle multiple JSON objects
+                current_offset = 1  # Start at 1 because offset 0 is the main line
+
+                for i, (json_obj, _, _) in enumerate(log_line.json_objects):
+                    # Add separator line between JSON objects
+                    if i > 0:
+                        if offset == current_offset:
+                            return ""  # Empty line as separator
+                        current_offset += 1
+
+                    # Get lines for this JSON object
+                    json_lines = json.dumps(json_obj, indent=2).split("\n")
+
+                    # Check if the requested offset is within this JSON object
+                    if current_offset <= offset < current_offset + len(json_lines):
+                        return json_lines[offset - current_offset]
+
+                    current_offset += len(json_lines)
+
                 return ""
+            else:
+                # Single JSON object (backward compatibility)
+                json_lines = json.dumps(log_line.json_data, indent=2).split("\n")
+                if offset - 1 < len(json_lines):
+                    return json_lines[offset - 1]
+                else:
+                    return ""
         elif log_line.xml_data:
             # XML sub-line
             # Import here to avoid circular dependency

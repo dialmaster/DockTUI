@@ -161,6 +161,11 @@ class LogRenderer:
         Returns:
             List of segments
         """
+        # Check if we have multiple JSON objects
+        if hasattr(log_line, "json_objects") and log_line.json_objects:
+            return self._render_multiple_json_line(log_line, line_offset, zebra_stripe)
+
+        # Single JSON object (backward compatibility)
         # Get pretty-printed JSON segments (already split into lines)
         json_lines = self.formatter.format_json_pretty(log_line.json_data)
 
@@ -172,6 +177,50 @@ class LogRenderer:
                     segments, log_line.line_number
                 )
             return segments
+
+        return []
+
+    def _render_multiple_json_line(
+        self, log_line: LogLine, line_offset: int, zebra_stripe: bool
+    ) -> List[Segment]:
+        """Render a line from multiple pretty-printed JSON objects.
+
+        Args:
+            log_line: The log line containing multiple JSON objects
+            line_offset: Offset within all the JSON lines
+            zebra_stripe: Whether to apply zebra striping
+
+        Returns:
+            List of segments
+        """
+        current_offset = 0
+
+        for i, (json_data, _, _) in enumerate(log_line.json_objects):
+            # Add separator line between JSON objects
+            if i > 0:
+                if line_offset == current_offset:
+                    # Return an empty line as separator
+                    segments = [Segment("", Style())]
+                    if zebra_stripe:
+                        segments = self.formatter.apply_zebra_stripe(
+                            segments, log_line.line_number
+                        )
+                    return segments
+                current_offset += 1
+
+            # Get pretty-printed JSON segments for this object
+            json_lines = self.formatter.format_json_pretty(json_data)
+
+            # Check if the requested line is within this JSON object
+            if current_offset <= line_offset < current_offset + len(json_lines):
+                segments = json_lines[line_offset - current_offset]
+                if zebra_stripe:
+                    segments = self.formatter.apply_zebra_stripe(
+                        segments, log_line.line_number
+                    )
+                return segments
+
+            current_offset += len(json_lines)
 
         return []
 
@@ -272,6 +321,27 @@ class LogRenderer:
         json_str = json.dumps(json_data, indent=2)
         # Add 1 for the original log line
         return len(json_str.split("\n")) + 1
+
+    @staticmethod
+    def count_all_json_lines(json_objects: List[Tuple[dict, int, int]]) -> int:
+        """Count total lines for all JSON objects when expanded.
+
+        Args:
+            json_objects: List of (json_data, start_pos, end_pos) tuples
+
+        Returns:
+            Total number of lines including separators and original log line
+        """
+        if not json_objects:
+            return 1  # Just the original line
+
+        total = 1  # Start with 1 for the original log line
+        for i, (json_data, _, _) in enumerate(json_objects):
+            if i > 0:
+                total += 1  # Add a blank line between JSON objects
+            json_str = json.dumps(json_data, indent=2)
+            total += len(json_str.split("\n"))
+        return total
 
     @staticmethod
     def count_xml_lines(xml_data: str) -> int:

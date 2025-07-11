@@ -166,18 +166,28 @@ class LogParser:
 
         # Detect JSON using pre-compiled pattern
         json_matches = list(self._json_pattern.finditer(text))
+        valid_json_objects = []
+
         for json_match in json_matches:
             try:
                 # Try to parse the JSON to validate it
                 json_str = json_match.group(1)
-                log_line.json_data = json.loads(json_str)
-                log_line.has_json = True
-                log_line.json_start_pos = json_match.start(1)
-                log_line.json_end_pos = json_match.end(1)
-                break  # Use the first valid JSON found
+                json_obj = json.loads(json_str)
+                start_pos = json_match.start(1)
+                end_pos = json_match.end(1)
+                valid_json_objects.append((json_obj, start_pos, end_pos))
             except json.JSONDecodeError:
                 # Not valid JSON, continue looking
                 continue
+
+        # Store all valid JSON objects
+        if valid_json_objects:
+            log_line.has_json = True
+            log_line.json_objects = valid_json_objects
+            # Keep backward compatibility - store first JSON in original fields
+            log_line.json_data = valid_json_objects[0][0]
+            log_line.json_start_pos = valid_json_objects[0][1]
+            log_line.json_end_pos = valid_json_objects[0][2]
 
         # Detect XML (only if we didn't find JSON)
         if not log_line.has_json:
@@ -231,11 +241,21 @@ class LogParser:
 
         # 4. JSON (if expanded)
         if log_line.has_json and log_line.is_expanded:
-            # For expanded JSON, mark everything before JSON as regular text
+            # For expanded JSON, mark everything before first JSON as regular text
             if log_line.json_start_pos and log_line.json_start_pos > 0:
                 add_component("text", 0, log_line.json_start_pos)
-            # Add an expanded JSON marker
-            if log_line.json_start_pos:
+
+            # Add expanded JSON markers for all JSON objects
+            if hasattr(log_line, "json_objects") and log_line.json_objects:
+                for json_obj, start_pos, end_pos in log_line.json_objects:
+                    if start_pos is not None:
+                        add_component(
+                            "json_expanded",
+                            start_pos,
+                            start_pos + 1,
+                        )
+            elif log_line.json_start_pos:
+                # Single JSON object (backward compatibility)
                 add_component(
                     "json_expanded",
                     log_line.json_start_pos,
