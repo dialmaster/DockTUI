@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.7](https://github.com/dialmaster/DockTUI/compare/v0.2.6...v0.2.7) (2025-07-11)
+
+
+### Features
+
+* improve log pane UX with help footer and consistent emoji place… ([547fc2d](https://github.com/dialmaster/DockTUI/commit/547fc2d7e2e3969284be848a04d9cd374fc021d2))
+* improve log pane UX with help footer and consistent emoji placement ([1a0f349](https://github.com/dialmaster/DockTUI/commit/1a0f3493d5ae04179a49396b57dde58e652f2609))
+
 ## [0.2.6](https://github.com/dialmaster/DockTUI/compare/v0.2.5...v0.2.6) (2025-07-11)
 
 
