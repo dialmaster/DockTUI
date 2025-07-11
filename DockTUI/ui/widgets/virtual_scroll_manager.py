@@ -3,6 +3,7 @@
 import json
 import logging
 import threading
+import time
 from typing import List, Optional, Tuple
 
 from textual.geometry import Size
@@ -37,6 +38,9 @@ class VirtualScrollManager:
         self._virtual_size_timer: Optional[threading.Timer] = None
         self._virtual_size_pending = False
         self._lock = threading.RLock()
+        self._last_update_time: float = (
+            0.0  # Track last update time for smart throttling
+        )
 
     def cleanup(self):
         """Clean up resources (timers, etc)."""
@@ -76,12 +80,29 @@ class VirtualScrollManager:
 
                         if line.json_data:
                             # Calculate height of pretty-printed JSON
-                            json_lines = count_json_lines_fn(line.json_data)
-                            total_height += json_lines
-                            # Check width of JSON lines
-                            json_str = json.dumps(line.json_data, indent=2)
-                            for json_line in json_str.split("\n"):
-                                max_width = max(max_width, len(json_line))
+                            if hasattr(line, "json_objects") and line.json_objects:
+                                # Multiple JSON objects
+                                from .log_renderer import LogRenderer
+
+                                json_lines = LogRenderer.count_all_json_lines(
+                                    line.json_objects
+                                )
+                                total_height += (
+                                    json_lines - 1
+                                )  # -1 because total_height already includes the line
+                                # Check width of all JSON objects
+                                for json_obj, _, _ in line.json_objects:
+                                    json_str = json.dumps(json_obj, indent=2)
+                                    for json_line in json_str.split("\n"):
+                                        max_width = max(max_width, len(json_line))
+                            else:
+                                # Single JSON object (backward compatibility)
+                                json_lines = count_json_lines_fn(line.json_data)
+                                total_height += json_lines
+                                # Check width of JSON lines
+                                json_str = json.dumps(line.json_data, indent=2)
+                                for json_line in json_str.split("\n"):
+                                    max_width = max(max_width, len(json_line))
                         elif line.xml_data:
                             # Calculate height of pretty-printed XML
                             xml_lines = count_xml_lines_fn(line.xml_data)
@@ -121,23 +142,64 @@ class VirtualScrollManager:
         self._virtual_size_cache = size
 
     def invalidate_virtual_size(self, callback_fn):
-        """Schedule a debounced virtual size recalculation.
+        """Schedule a smart throttled virtual size recalculation.
+
+        Uses smart throttling:
+        - If enough time has passed since last update, update immediately
+        - Otherwise, schedule a throttled update
 
         Args:
             callback_fn: Function to call when recalculation is complete
         """
         with self._lock:
-            self._virtual_size_pending = True
+            current_time = time.time()
+            time_since_last_update = current_time - self._last_update_time
 
-            if self._virtual_size_timer is None:
-                # Schedule new recalculation
-                self._virtual_size_timer = threading.Timer(
-                    self.VIRTUAL_SIZE_THROTTLE_DELAY,
-                    self._perform_virtual_size_recalculation,
-                    args=(callback_fn,),
+            # Check if we should update immediately (first update after quiet period)
+            if time_since_last_update >= self.VIRTUAL_SIZE_THROTTLE_DELAY:
+                # Immediate update - enough time has passed
+                logger.debug(
+                    f"Smart throttle: Immediate update (last update {time_since_last_update:.3f}s ago)"
                 )
-                self._virtual_size_timer.daemon = True
-                self._virtual_size_timer.start()
+
+                # Cancel any pending timer
+                if self._virtual_size_timer is not None:
+                    self._virtual_size_timer.cancel()
+                    self._virtual_size_timer = None
+
+                # Perform update immediately
+                self._virtual_size_cache = None
+                self._virtual_size_pending = False
+                self._last_update_time = current_time
+
+                # Call callback immediately - but still use timer with 0 delay to ensure proper threading
+                if callback_fn:
+                    self._virtual_size_timer = threading.Timer(
+                        0, callback_fn  # Immediate execution
+                    )
+                    self._virtual_size_timer.daemon = True
+                    self._virtual_size_timer.start()
+            else:
+                # Throttled update - too soon since last update
+                self._virtual_size_pending = True
+
+                if self._virtual_size_timer is None:
+                    # Calculate remaining time to wait
+                    remaining_delay = (
+                        self.VIRTUAL_SIZE_THROTTLE_DELAY - time_since_last_update
+                    )
+                    logger.debug(
+                        f"Smart throttle: Scheduling update in {remaining_delay:.3f}s"
+                    )
+
+                    # Schedule new recalculation
+                    self._virtual_size_timer = threading.Timer(
+                        remaining_delay,
+                        self._perform_virtual_size_recalculation,
+                        args=(callback_fn,),
+                    )
+                    self._virtual_size_timer.daemon = True
+                    self._virtual_size_timer.start()
 
     def invalidate_virtual_size_immediate(self):
         """Immediately invalidate virtual size cache with no throttling."""
@@ -163,6 +225,7 @@ class VirtualScrollManager:
             self._virtual_size_cache = None
             self._virtual_size_pending = False
             self._virtual_size_timer = None
+            self._last_update_time = time.time()  # Record update time
 
         # Call the callback to trigger refresh
         if callback_fn:
@@ -195,7 +258,14 @@ class VirtualScrollManager:
                     # Ensure parsed to check for JSON/XML
                     line.ensure_parsed()
                     if line.json_data:
-                        line_height = count_json_lines_fn(line.json_data)
+                        if hasattr(line, "json_objects") and line.json_objects:
+                            from .log_renderer import LogRenderer
+
+                            line_height = LogRenderer.count_all_json_lines(
+                                line.json_objects
+                            )
+                        else:
+                            line_height = count_json_lines_fn(line.json_data)
                     elif line.xml_data:
                         line_height = count_xml_lines_fn(line.xml_data)
                     else:
@@ -266,7 +336,14 @@ class VirtualScrollManager:
             # Calculate line height
             if line.is_expanded and line.is_parsed:
                 if line.json_data:
-                    line_height = count_json_lines_fn(line.json_data)
+                    if hasattr(line, "json_objects") and line.json_objects:
+                        from .log_renderer import LogRenderer
+
+                        line_height = LogRenderer.count_all_json_lines(
+                            line.json_objects
+                        )
+                    else:
+                        line_height = count_json_lines_fn(line.json_data)
                 elif line.xml_data:
                     line_height = count_xml_lines_fn(line.xml_data)
                 else:
@@ -301,7 +378,14 @@ class VirtualScrollManager:
             if line.is_expanded:
                 line.ensure_parsed()
                 if line.json_data:
-                    total_virtual_lines += count_json_lines_fn(line.json_data)
+                    if hasattr(line, "json_objects") and line.json_objects:
+                        from .log_renderer import LogRenderer
+
+                        total_virtual_lines += LogRenderer.count_all_json_lines(
+                            line.json_objects
+                        )
+                    else:
+                        total_virtual_lines += count_json_lines_fn(line.json_data)
                 elif line.xml_data:
                     total_virtual_lines += count_xml_lines_fn(line.xml_data)
                 else:
