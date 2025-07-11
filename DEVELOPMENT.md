@@ -337,34 +337,7 @@ All checks must pass before merging pull requests.
 
 ## Release Process
 
-DockTUI uses [release-please](https://github.com/googleapis/release-please) for automated versioning and releases. The project follows [Semantic Versioning](https://semver.org/).
-
-### Creating a Release
-
-1. Navigate to Actions → Manual Release in GitHub
-2. Click "Run workflow" and select the branch (default: main)
-3. Review and merge the generated release PR
-4. Run the workflow again to create the GitHub release and tag
-5. After the tag is created, manually trigger the Docker Publish workflow:
-   - Go to Actions → Docker Publish
-   - Click "Run workflow" and select the branch (default: main)
-   - This publishes the new version to Docker Hub
-
-The release process is fully automated based on conventional commit messages.
-
-### Docker Hub Publishing
-
-When a release is created, the workflow automatically:
-- Builds multi-platform Docker images (linux/amd64 and linux/arm64)
-- Tags images with version numbers (e.g., `1.0.0`, `1.0`, `latest`)
-- Pushes to Docker Hub at `dialmaster/docktui`
-- Updates the Docker Hub description with the README
-
-Users can then pull specific versions with:
-```bash
-./start.sh -v 1.0.0  # Specific version
-./start.sh           # Latest version
-```
+See [RELEASING.md](RELEASING.md) for detailed release instructions.
 
 ## Advanced Configuration
 
