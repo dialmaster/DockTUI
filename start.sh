@@ -177,7 +177,7 @@ fi
 
 DOCKER_CMD="$DOCKER_CMD -v /:/host:ro"  # Mount entire filesystem read-only for compose files
 DOCKER_CMD="$DOCKER_CMD -v $HOME:$HOME:ro"  # Mount home directory for better compatibility
-DOCKER_CMD="$DOCKER_CMD -w /host$(pwd)"  # Set working directory to current directory
+# Do not set working directory - use the image's default /app directory
 
 # Create logs directory on host if it doesn't exist (for debug mode)
 if [[ "$DEBUG_MODE" == true ]]; then
