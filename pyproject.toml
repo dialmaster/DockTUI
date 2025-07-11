@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "DockTUI"
-version = "0.2.6"
+version = "0.2.7"
 description = "An interactive terminal dashboard for monitoring and managing Docker Compose environments"
 authors = ["Chris Dial <dial.chris@gmail.com>"]
 license = "MIT"
