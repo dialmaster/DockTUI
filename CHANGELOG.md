@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.5](https://github.com/dialmaster/DockTUI/compare/v0.2.4...v0.2.5) (2025-07-11)
+
+
+### Features
+
+* log enhancements ([357aaf2](https://github.com/dialmaster/DockTUI/commit/357aaf289baec33c8b7a760227a58ce2fab83e93))
+* log enhancements ([9896b8b](https://github.com/dialmaster/DockTUI/commit/9896b8b27f8688990612870df7c58fa1745632ed))
+
+
+### Bug Fixes
+
+* another attempt to fix dockerized app on Mac ([9cdf606](https://github.com/dialmaster/DockTUI/commit/9cdf6067e3f99496f2fb3df6f5d9647e6d703c86))
+* another attempt to fix dockerized app on Mac ([f0c169a](https://github.com/dialmaster/DockTUI/commit/f0c169af9a027669f527b9627ec000d142d65019))
+* Attempt to fix mouse on Mac ([7456000](https://github.com/dialmaster/DockTUI/commit/74560001c95b365b71d5a3b36e9a168fc0308383))
+* Attempt to fix mouse on Mac ([816f551](https://github.com/dialmaster/DockTUI/commit/816f55126d39466d950db77132ccdaff773a4cad))
+* continued attempts to fix on Mac ([01ef533](https://github.com/dialmaster/DockTUI/commit/01ef533050791106b855bfdeb8d8fcdc4448f90d))
+* continued attempts to fix on Mac ([0049d2b](https://github.com/dialmaster/DockTUI/commit/0049d2b0422b233f44110516acf9bf1a011872c1))
+* docker on Mac ([f63e380](https://github.com/dialmaster/DockTUI/commit/f63e380312f54af95af044292cfd8ee28c9a6ba1))
+* docker on Mac ([706678d](https://github.com/dialmaster/DockTUI/commit/706678da6fc262e41452fdeaa2afd5c60e624c74))
+* dockerized app on Mac ([1f68508](https://github.com/dialmaster/DockTUI/commit/1f68508ebc19527e63c7ab3ad1bf0418173f4c7b))
+* yet another attempt to fix on Mac ([5194d8d](https://github.com/dialmaster/DockTUI/commit/5194d8dd42523b3d98a913bc86b43ca305937335))
+* yet another attempt to fix on Mac ([72b0605](https://github.com/dialmaster/DockTUI/commit/72b0605cb610f9f9fb7cfdae45e3a3db7825ce55))
+
+
+### Miscellaneous
+
+* final update to release workflow ([2124a92](https://github.com/dialmaster/DockTUI/commit/2124a927d92ce7405e597ec63c632c64dc2d97a2))
+* final update to release workflow ([8c9759c](https://github.com/dialmaster/DockTUI/commit/8c9759cede506c974501e0a3562d93b56dc1e0aa))
+
 ## [0.2.4](https://github.com/dialmaster/DockTUI/compare/v0.2.3...v0.2.4) (2025-07-10)
 
 
