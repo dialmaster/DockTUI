@@ -353,14 +353,17 @@ class TestLogFormatter:
         assert formatter._should_use_smart_highlighting(components, "test") == False
     
     def test_insert_json_emoji_no_position(self, formatter):
-        """Test JSON emoji insertion with no position."""
+        """Test JSON emoji insertion always adds at beginning."""
         segments = [Segment("test", Style())]
         result = formatter._insert_json_emoji(segments, None)
         
-        assert result == segments
+        # Now emoji is always added at the beginning
+        assert len(result) == 2
+        assert result[0].text == "📋 "
+        assert result[1].text == "test"
     
     def test_insert_json_emoji_at_start(self, formatter):
-        """Test JSON emoji insertion at start of text."""
+        """Test JSON emoji insertion always at beginning."""
         segments = [Segment('{"key": "value"}', Style())]
         result = formatter._insert_json_emoji(segments, 0)
         
@@ -370,14 +373,14 @@ class TestLogFormatter:
         assert result[1].text == '{"key": "value"}'
     
     def test_insert_json_emoji_in_middle(self, formatter):
-        """Test JSON emoji insertion in middle of segment."""
+        """Test JSON emoji insertion always at beginning."""
         segments = [Segment("Response: {data}", Style())]
         result = formatter._insert_json_emoji(segments, 10)
         
-        assert len(result) == 3
-        assert result[0].text == "Response: "
-        assert result[1].text == "📋 "
-        assert result[2].text == "{data}"
+        # Now emoji is always at the beginning
+        assert len(result) == 2
+        assert result[0].text == "📋 "
+        assert result[1].text == "Response: {data}"
     
     def test_insert_json_emoji_across_segments(self, formatter):
         """Test JSON emoji insertion between segments."""
@@ -392,22 +395,25 @@ class TestLogFormatter:
         assert any(seg.text == "📋 " for seg in result)
     
     def test_insert_xml_emoji_no_position(self, formatter):
-        """Test XML emoji insertion with no position."""
+        """Test XML emoji insertion always adds at beginning."""
         segments = [Segment("test", Style())]
         result = formatter._insert_xml_emoji(segments, None)
         
-        assert result == segments
+        # Now emoji is always added at the beginning
+        assert len(result) == 2
+        assert result[0].text == "📄 "
+        assert result[1].text == "test"
     
     def test_insert_xml_emoji_at_position(self, formatter):
-        """Test XML emoji insertion at specific position."""
+        """Test XML emoji insertion always at beginning."""
         segments = [Segment("Data: <root>test</root>", Style())]
         result = formatter._insert_xml_emoji(segments, 6)
         
-        assert len(result) == 3
-        assert result[0].text == "Data: "
-        assert result[1].text == "📄 "
-        assert "bright_blue" in str(result[1].style.color)
-        assert result[2].text == "<root>test</root>"
+        # Now emoji is always at the beginning
+        assert len(result) == 2
+        assert result[0].text == "📄 "
+        assert "bright_blue" in str(result[0].style.color)
+        assert result[1].text == "Data: <root>test</root>"
     
     def test_create_smart_segments_with_json_emoji(self, formatter, mock_log_line):
         """Test smart segment creation with JSON emoji insertion."""
@@ -521,7 +527,7 @@ class TestLogFormatter:
         assert result == [segment]
     
     def test_insert_xml_emoji_multiple_segments(self, formatter):
-        """Test XML emoji insertion with segments before insertion point."""
+        """Test XML emoji insertion always at beginning."""
         # Create segments where emoji position is in a later segment
         segments = [
             Segment("Before ", Style()),  # 0-7
@@ -529,12 +535,14 @@ class TestLogFormatter:
             Segment("<xml>", Style())     # 12-17
         ]
         
-        # Insert emoji at position 12 (start of third segment)
+        # Insert emoji at position 12 (but now it always goes at the beginning)
         result = formatter._insert_xml_emoji(segments, 12)
         
-        # First two segments should be unchanged
-        assert result[0].text == "Before "
-        assert result[1].text == "text "
-        # Emoji should be inserted before third segment
+        # Now emoji is always at the beginning
+        assert len(result) == 4  # emoji + 3 original segments
+        assert result[0].text == "📄 "
+        assert result[1].text == "Before "
+        assert result[2].text == "text "
+        assert result[3].text == "<xml>"
         assert any(seg.text == "📄 " for seg in result)
         assert any(seg.text == "<xml>" for seg in result)
