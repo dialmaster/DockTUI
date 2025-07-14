@@ -56,11 +56,6 @@ class StackManager:
         # Track that this stack exists in the new data
         self._stacks_in_new_data.add(name)
 
-        # Get operation status from parent if available
-        operation_status = None
-        if hasattr(self.parent, "get_stack_status"):
-            operation_status = self.parent.get_stack_status(name)
-
         if name not in self.stack_tables:
             header = StackHeader(
                 name,
@@ -70,7 +65,6 @@ class StackManager:
                 total,
                 can_recreate,
                 has_compose_file,
-                operation_status,
             )
             table = self.parent.create_stack_table(name)
 
@@ -99,21 +93,6 @@ class StackManager:
         else:
             header = self.stack_headers[name]
             was_expanded = header.expanded
-            # Only preserve existing operation status if:
-            # 1. New status is None
-            # 2. Header has an existing status
-            # 3. The status is still in the parent's overrides (not cleared)
-            if operation_status is None and header.operation_status:
-                # Check if the status is still valid in the parent's overrides
-                if (
-                    hasattr(self.parent, "_stack_status_overrides")
-                    and isinstance(self.parent._stack_status_overrides, dict)
-                    and name in self.parent._stack_status_overrides
-                ):
-                    operation_status = header.operation_status
-                else:
-                    # Status was cleared, so don't preserve it
-                    operation_status = None
             header.running = running
             header.exited = exited
             header.total = total
@@ -121,7 +100,6 @@ class StackManager:
             header.can_recreate = can_recreate
             header.has_compose_file = has_compose_file
             header.expanded = was_expanded
-            header.operation_status = operation_status
             self.stack_tables[name].styles.display = "block" if was_expanded else "none"
             header._update_content()
 
@@ -179,27 +157,32 @@ class StackManager:
             should_apply_override = False
 
             if override == "stopping...":
-                # Only show "stopping..." if container is still running
-                should_apply_override = actual_status in ["running", "restarting"]
-            elif override == "starting...":
-                # Only show "starting..." if container is not yet running
-                should_apply_override = actual_status in [
+                # Show "stopping..." until container reaches exited state
+                should_apply_override = actual_status not in [
                     "exited",
-                    "stopped",
-                    "created",
-                    "paused",
+                    "dead",
+                    "removed",
                 ]
-            elif override in ["restarting...", "recreating..."]:
-                # For these operations, show the status for up to 10 seconds
-                # After that, assume the operation has completed
-                if override_time:
+            elif override == "starting...":
+                # Show "starting..." until container is actually running
+                should_apply_override = actual_status not in ["running", "restarting"]
+            elif override == "restarting...":
+                # Show "restarting..." until container is back to running state
+                # or for up to 10 seconds if it stays in a different state
+                if actual_status in ["running"]:
+                    should_apply_override = False
+                elif override_time:
                     import time
 
                     elapsed = time.time() - override_time
                     should_apply_override = elapsed < 10.0  # 10 second timeout
                 else:
-                    # If no timestamp, show for backwards compatibility
                     should_apply_override = True
+            elif override == "recreating...":
+                # Show "recreating..." until container is running again
+                # Recreate typically involves: stop -> remove -> create -> start
+                # So we show this status until the container is back to running
+                should_apply_override = actual_status not in ["running"]
 
             if should_apply_override:
                 status = override
@@ -288,8 +271,95 @@ class StackManager:
                     else:
                         # Update the existing row in the same stack
                         try:
-                            for col_idx, value in enumerate(row_data):
-                                table.update_cell(existing_row, col_idx, value)
+                            # Get the position of the current row to maintain order
+                            row_position = None
+                            for idx, row_key in enumerate(table.rows):
+                                if row_key == container_id:
+                                    row_position = idx
+                                    break
+
+                            if row_position is not None:
+                                # Get all rows data to preserve order
+                                all_rows_data = []
+
+                                # Remember if this container was selected
+                                was_selected = (
+                                    hasattr(table, "_selected_row_key")
+                                    and table._selected_row_key == container_id
+                                )
+                                selected_row_key = getattr(
+                                    table, "_selected_row_key", None
+                                )
+
+                                # Convert table.rows to a list for indexing
+                                row_keys_list = list(table.rows)
+
+                                # Collect all row data
+                                for row_idx in range(table.row_count):
+                                    if row_idx == row_position:
+                                        # Use the new data for this container
+                                        all_rows_data.append((container_id, row_data))
+                                    else:
+                                        # Preserve existing row data
+                                        row_values = []
+                                        # Get the row key at this position
+                                        if row_idx < len(row_keys_list):
+                                            row_key_at_idx = row_keys_list[row_idx]
+
+                                            # Get the row data using the row key
+                                            try:
+                                                existing_row_data = table.get_row(
+                                                    row_key_at_idx
+                                                )
+                                                row_values = list(existing_row_data)
+                                            except Exception:
+                                                # Fallback to empty values
+                                                row_values = [""] * len(row_data)
+                                        else:
+                                            # Fallback to empty values
+                                            row_values = [""] * len(row_data)
+
+                                        # Get the container ID from the first column
+                                        container_id_for_row = (
+                                            row_values[0]
+                                            if row_values
+                                            else f"unknown_{row_idx}"
+                                        )
+                                        all_rows_data.append(
+                                            (container_id_for_row, row_values)
+                                        )
+
+                                # Clear and rebuild the table to force immediate visual update
+                                table.clear()
+
+                                # Track the new position of the selected container
+                                new_selected_position = None
+
+                                for idx, (row_id, values) in enumerate(all_rows_data):
+                                    table.add_row(*values, key=row_id)
+                                    # Update container_rows mapping
+                                    self.container_rows[row_id] = (stack_name, idx)
+
+                                    # Track where the selected container ends up
+                                    if selected_row_key and row_id == selected_row_key:
+                                        new_selected_position = idx
+
+                                # Restore selection state and cursor position
+                                if was_selected and new_selected_position is not None:
+                                    table._selected_row_key = selected_row_key
+                                    table.add_class("has-selection")
+                                    # Move cursor to the correct new position
+                                    table.move_cursor(row=new_selected_position)
+
+                                # Force a refresh to ensure visual update
+                                table.refresh()
+                            else:
+                                # Fallback: just add as new row if position not found
+                                table.add_row(*row_data, key=container_id)
+                                self.container_rows[container_id] = (
+                                    stack_name,
+                                    table.row_count - 1,
+                                )
                         except Exception as e:
                             logger.error(
                                 f"Error updating container {container_id}: {str(e)}",

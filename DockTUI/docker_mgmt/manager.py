@@ -460,7 +460,7 @@ class DockerManager:
                     for config_file in config_files.split(","):
                         cmd.extend(["-f", config_file.strip()])
 
-                cmd.extend(["up", "-d", service_name])
+                cmd.extend(["up", "-d", "--force-recreate", service_name])
                 logger.info(f"Executing recreate command: {' '.join(cmd)}")
 
                 # Set transition state for recreate
@@ -1040,6 +1040,20 @@ class DockerManager:
                 process = subprocess.Popen(
                     cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
                 )
+
+                # Start a thread to monitor the process output
+                def monitor_recreate():
+                    stdout, stderr = process.communicate()
+                    if process.returncode != 0:
+                        error_msg = f"Stack recreate failed: {stderr}"
+                        logger.error(error_msg)
+                        self.last_error = error_msg
+                    else:
+                        logger.info(f"Stack recreate completed successfully: {stdout}")
+
+                thread = threading.Thread(target=monitor_recreate)
+                thread.daemon = True
+                thread.start()
 
                 # Clear any previous error if the operation succeeded
                 self.last_error = None

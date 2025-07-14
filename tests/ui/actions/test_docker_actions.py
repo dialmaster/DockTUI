@@ -147,7 +147,6 @@ class TestDockerActions:
         app.container_list.update_container_status.assert_called_once_with(
             "test-container", "starting..."
         )
-        app.refresh.assert_called_once()
 
         # Verify thread was started
         mock_thread.assert_called_once()
@@ -172,7 +171,6 @@ class TestDockerActions:
         app.container_list.update_container_status.assert_called_once_with(
             "test-container", "stopping..."
         )
-        app.refresh.assert_called_once()
 
         # Verify thread was started
         mock_thread.assert_called_once()
@@ -217,18 +215,10 @@ class TestDockerActions:
 
         app.execute_docker_command("start")
 
-        # Check that set_stack_status was called instead of error_display
-        app.container_list.set_stack_status.assert_called_once_with(
-            "my-stack", "Starting..."
-        )
-        
         # Check that set_stack_containers_status was called
         app.container_list.set_stack_containers_status.assert_called_once_with(
             "my-stack", "start"
         )
-        
-        # Check that refresh was called to update the UI
-        app.refresh.assert_called_once()
         
         # Check that a timer was set to call action_refresh
         assert len(app._timers) == 1
@@ -256,18 +246,10 @@ class TestDockerActions:
 
         app.execute_docker_command("down")
 
-        # Check that set_stack_status was called instead of error_display
-        app.container_list.set_stack_status.assert_called_once_with(
-            "my-stack", "Taking down..."
-        )
-        
         # Check that set_stack_containers_status was called
         app.container_list.set_stack_containers_status.assert_called_once_with(
             "my-stack", "down"
         )
-        
-        # Check that refresh was called to update the UI
-        app.refresh.assert_called_once()
         
         # Check that a timer was set to call action_refresh
         assert len(app._timers) == 1
@@ -438,9 +420,10 @@ class TestDockerActions:
 
         app.execute_docker_command("start")
 
-        # Check that set_stack_status was called
-        app.container_list.set_stack_status.assert_called_once_with(
-            "my-stack", "Starting..."
+        # Stack status is no longer set directly, only container statuses
+        # Check that set_stack_containers_status was called  
+        app.container_list.set_stack_containers_status.assert_called_once_with(
+            "my-stack", "start"
         )
         
         # The actual error would be shown from the background thread

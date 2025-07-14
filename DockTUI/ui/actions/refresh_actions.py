@@ -219,6 +219,16 @@ class RefreshActions:
                                 if hasattr(self, "refresh_bindings"):
                                     self.refresh_bindings()
                             break
+                elif item_type == "stack":
+                    # For stacks, check if any container status changed
+                    # This is important so log pane can refresh when containers in the stack change status
+                    if item_id in stacks:
+                        stack_info = stacks[item_id]
+                        # Force a log pane update with the latest stack data
+                        # The log pane will re-stream logs from all containers in the stack
+                        self.log_pane.update_selection(
+                            "stack", item_id, stack_info, force_restart=False
+                        )
                 elif item_type == "image":
                     # Check if selected image's usage status changed
                     if self.container_list.image_manager.selected_image_data:

@@ -30,8 +30,7 @@ class TestStackManager(unittest.TestCase):
         self.parent.stacks_container.children = []
         self.parent._is_updating = False
         self.parent._status_overrides = {}
-        self.parent._stack_status_overrides = {}
-        self.parent.get_stack_status = Mock(return_value=None)
+        # Stack status overrides no longer exist
         self.parent.screen = None
 
         self.manager = StackManager(self.parent)
@@ -73,8 +72,7 @@ class TestStackManager(unittest.TestCase):
             "test-stack",
             "/path/to/compose.yml",
             2, 1, 3,
-            True, True,
-            None  # operation_status
+            True, True
         )
 
         # Check table was created
@@ -255,6 +253,8 @@ class TestStackManager(unittest.TestCase):
         """Test updating an existing container."""
         mock_table = Mock()
         mock_table.row_count = 2
+        mock_table.rows = {"abc123": 1}  # Mock the rows attribute
+        mock_table.get_row = Mock(return_value=["abc123", "old-name", "stopped", "1 hour", "5%", "50MB", "5", ""])
         self.manager.stack_tables["test-stack"] = mock_table
         self.manager.container_rows["abc123"] = ("test-stack", 1)
         self.parent._is_updating = False
@@ -272,8 +272,10 @@ class TestStackManager(unittest.TestCase):
 
         self.manager.add_container_to_stack("test-stack", container_data)
 
-        # Check cells were updated
-        self.assertEqual(mock_table.update_cell.call_count, 8)  # 8 columns
+        # Check table was cleared and rebuilt
+        mock_table.clear.assert_called_once()
+        # Check row was added with new data
+        mock_table.add_row.assert_called()
 
     def test_add_container_to_stack_move_between_stacks(self):
         """Test moving container between stacks."""
