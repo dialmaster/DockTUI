@@ -90,6 +90,12 @@ class LogStateManager:
         if not status:
             return False
         status_lower = status.lower()
+        # Exclude transition states like "stopping...", "starting...", "restarting..."
+        if any(
+            transition in status_lower
+            for transition in ["stopping", "starting", "restarting"]
+        ):
+            return False
         return "running" in status_lower or "up" in status_lower
 
     def is_container_stopped(self, status: str) -> bool:
@@ -116,7 +122,7 @@ class LogStateManager:
             new_item_data: New item data to compare
 
         Returns:
-            "started" if container started, "stopped" if stopped, None if no change
+            "started" if container started, "stopped" if stopped, "restarted" if restarted, None if no change
         """
         if not self.current_item_data:
             return None
@@ -125,9 +131,10 @@ class LogStateManager:
         new_status = new_item_data.get("status", "").lower()
 
         # Check if container stopped
-        if self.is_container_running(old_status) and self.is_container_stopped(
-            new_status
-        ):
+        # This includes transitions like "stopping..." -> "exited"
+        if (
+            self.is_container_running(old_status) or "stopping" in old_status
+        ) and self.is_container_stopped(new_status):
             return "stopped"
 
         # Check if container started
@@ -135,6 +142,15 @@ class LogStateManager:
             new_status
         ):
             return "started"
+
+        # Check if container was restarting and is now running
+        # This handles the case where status goes from "restarting..." to "running"
+        if (
+            "restarting" in old_status
+            and "running" in new_status
+            and "restarting" not in new_status
+        ):
+            return "restarted"
 
         return None
 

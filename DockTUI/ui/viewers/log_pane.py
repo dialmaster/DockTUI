@@ -174,7 +174,29 @@ class LogPane(Vertical):
                 status_change = self.log_state_manager.check_status_change(item_data)
                 if status_change:
                     # Container status changed, update the display
-                    self._handle_status_change(item_data)
+                    self._handle_status_change(item_data, status_change)
+                    # Restore dropdown states after UI updates
+                    self.call_after_refresh(
+                        lambda: self.log_state_manager.restore_dropdown_states(
+                            dropdown_states, self.tail_select, self.since_select
+                        )
+                    )
+                    return
+            elif item_type == "stack":
+                # For stacks, check if container statuses have changed
+                stack_status_changed = self._check_stack_containers_status_changed(
+                    item_data
+                )
+                if stack_status_changed:
+                    logger.info(
+                        f"Stack '{item_id}' containers status changed, refreshing logs"
+                    )
+                    # Force restart logs to pick up new container states
+                    self._clear_logs()
+                    self._set_log_text(
+                        f"Stack container status changed. Refreshing logs...\n"
+                    )
+                    self._start_logs()
                     # Restore dropdown states after UI updates
                     self.call_after_refresh(
                         lambda: self.log_state_manager.restore_dropdown_states(
@@ -185,6 +207,16 @@ class LogPane(Vertical):
 
             # Update the stored data but don't restart logs for the same selection
             self.log_state_manager.current_item_data = item_data
+
+            # Update header to reflect current status (e.g., NOT RUNNING)
+            if item_type == "container":
+                status = item_data.get("status", "")
+                item_name = item_data.get("name", item_id)
+                logger.debug(
+                    f"Updating header for container {item_name} with status: {status}"
+                )
+                self.log_state_manager.update_header_with_status(item_name, status)
+
             # Restore dropdown states even when returning early
             self.call_after_refresh(
                 lambda: self.log_state_manager.restore_dropdown_states(
@@ -275,8 +307,13 @@ class LogPane(Vertical):
             )
         )
 
-    def _handle_status_change(self, item_data: dict):
-        """Handle container status changes (started/stopped)."""
+    def _handle_status_change(self, item_data: dict, status_change: str = None):
+        """Handle container status changes (started/stopped/restarted).
+
+        Args:
+            item_data: Container data
+            status_change: Type of status change ("started", "stopped", "restarted")
+        """
         # Stop any existing log streaming without blocking UI
         if self.log_stream_manager:
             self.log_stream_manager.stop_streaming(wait=False)
@@ -293,7 +330,11 @@ class LogPane(Vertical):
         self.log_state_manager.update_header_with_status(item_name, status)
 
         # Load logs with appropriate message
-        if self.log_state_manager.is_container_stopped(status):
+        if status_change == "restarted":
+            self._set_log_text(
+                f"Container '{item_name}' restarted. Loading fresh logs...\n"
+            )
+        elif self.log_state_manager.is_container_stopped(status):
             self._set_log_text(
                 f"Container '{item_name}' stopped. Loading historical logs...\n"
             )
@@ -550,3 +591,33 @@ class LogPane(Vertical):
             id="since-select",
             classes="log-setting",
         )
+
+    def _check_stack_containers_status_changed(self, new_stack_data: dict) -> bool:
+        """Check if any container statuses in a stack have changed.
+
+        Args:
+            new_stack_data: New stack data to compare
+
+        Returns:
+            True if any container status changed, False otherwise
+        """
+        # Get the stored stack data
+        old_stack_data = self.log_state_manager.current_item_data
+        if not old_stack_data:
+            return False
+
+        # Extract container status counts
+        old_running = old_stack_data.get("running", 0)
+        old_exited = old_stack_data.get("exited", 0)
+        new_running = new_stack_data.get("running", 0)
+        new_exited = new_stack_data.get("exited", 0)
+
+        # Check if the counts have changed
+        if old_running != new_running or old_exited != new_exited:
+            logger.debug(
+                f"Stack container counts changed: running {old_running}->{new_running}, "
+                f"exited {old_exited}->{new_exited}"
+            )
+            return True
+
+        return False

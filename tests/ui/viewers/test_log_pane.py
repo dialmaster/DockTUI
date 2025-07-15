@@ -526,7 +526,8 @@ class TestLogPane:
         
         # Should detect status change and handle it
         log_pane._handle_status_change.assert_called_once_with(
-            {"name": "test", "status": "running"}
+            {"name": "test", "status": "running"},
+            log_pane.log_state_manager.check_status_change.return_value
         )
         
         # Should still save/restore dropdown states
@@ -565,6 +566,50 @@ class TestLogPane:
         # Display state should be updated
         assert log_pane.log_display.display == True
         assert log_pane.no_selection_display.display == False
+
+    def test_update_selection_stack_containers_status_changed(self, log_pane):
+        """Test that stack log refresh happens when container counts change."""
+        # Set initial stack selection
+        log_pane.log_state_manager.current_item = ("stack", "mystack")
+        log_pane.log_state_manager.current_item_data = {"name": "mystack", "running": 2, "exited": 1}
+        
+        # Mock dependencies
+        log_pane.log_state_manager.save_dropdown_states = Mock(return_value={})
+        log_pane.log_state_manager.restore_dropdown_states = Mock()
+        log_pane.log_state_manager.is_same_item = Mock(return_value=True)
+        log_pane._clear_logs = Mock()
+        log_pane._set_log_text = Mock()
+        log_pane._start_logs = Mock()
+        log_pane.call_after_refresh = Mock()
+        
+        # Update with same stack but different container counts (simulating containers started)
+        log_pane.update_selection("stack", "mystack", {"name": "mystack", "running": 3, "exited": 0})
+        
+        # Verify logs were refreshed
+        log_pane._clear_logs.assert_called_once()
+        log_pane._set_log_text.assert_called_once_with("Stack container status changed. Refreshing logs...\n")
+        log_pane._start_logs.assert_called_once()
+        
+    def test_check_stack_containers_status_changed(self, log_pane):
+        """Test the _check_stack_containers_status_changed method."""
+        # Set initial stack data
+        log_pane.log_state_manager.current_item_data = {"running": 2, "exited": 1}
+        
+        # Test no change
+        assert log_pane._check_stack_containers_status_changed({"running": 2, "exited": 1}) == False
+        
+        # Test running count changed
+        assert log_pane._check_stack_containers_status_changed({"running": 3, "exited": 1}) == True
+        
+        # Test exited count changed
+        assert log_pane._check_stack_containers_status_changed({"running": 2, "exited": 0}) == True
+        
+        # Test both changed
+        assert log_pane._check_stack_containers_status_changed({"running": 3, "exited": 0}) == True
+        
+        # Test with no previous data
+        log_pane.log_state_manager.current_item_data = None
+        assert log_pane._check_stack_containers_status_changed({"running": 3, "exited": 0}) == False
 
     def test_init_with_docker_client_success(self):
         """Test successful Docker client initialization."""
@@ -1072,6 +1117,52 @@ class TestLogPane:
             "Container 'test_container' started. Loading logs...\n"
         )
         log_pane._start_logs.assert_called_once()
+        
+    def test_handle_status_change_restarted(self, log_pane):
+        """Test handling container status change to restarted."""
+        # Set up current item
+        log_pane.log_state_manager.current_item = ("container", "test_id")
+        log_pane.log_state_manager.current_item_data = {"name": "test_container"}
+        log_pane.log_state_manager.is_container_stopped = Mock(return_value=False)
+        
+        # Mock methods
+        log_pane._clear_logs = Mock()
+        log_pane._set_log_text = Mock()
+        log_pane._start_logs = Mock()
+        
+        # Call _handle_status_change with restarted status
+        item_data = {"name": "test_container", "status": "running"}
+        log_pane._handle_status_change(item_data, "restarted")
+        
+        # Should update header and show restarted message
+        log_pane.log_state_manager.update_header_with_status.assert_called_once_with(
+            "test_container", "running"
+        )
+        log_pane._set_log_text.assert_called_once_with(
+            "Container 'test_container' restarted. Loading fresh logs...\n"
+        )
+        log_pane._start_logs.assert_called_once()
+        
+    def test_update_selection_updates_header_for_stopped_container(self, log_pane):
+        """Test that update_selection updates header to show NOT RUNNING for stopped container."""
+        # Set up current selection
+        log_pane.log_state_manager.current_item = ("container", "test_id")
+        log_pane.log_state_manager.current_item_data = {"name": "test_container", "status": "running"}
+        log_pane.log_state_manager.is_same_item = Mock(return_value=True)
+        log_pane.log_state_manager.check_status_change = Mock(return_value=None)  # No transition detected
+        log_pane.log_state_manager.save_dropdown_states = Mock(return_value={})
+        log_pane.log_state_manager.restore_dropdown_states = Mock()
+        log_pane.log_state_manager.update_header_with_status = Mock()
+        log_pane.call_after_refresh = Mock()
+        
+        # Call update_selection with stopped container data
+        stopped_data = {"name": "test_container", "status": "exited"}
+        log_pane.update_selection("container", "test_id", stopped_data)
+        
+        # Should update header to show NOT RUNNING
+        log_pane.log_state_manager.update_header_with_status.assert_called_once_with(
+            "test_container", "exited"
+        )
         
     def test_start_logs_no_current_item(self, log_pane):
         """Test starting logs with no current item."""

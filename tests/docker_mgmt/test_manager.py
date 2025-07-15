@@ -657,6 +657,8 @@ class TestDockerManager:
                 mock_process = Mock()
                 mock_process.stdout = Mock()
                 mock_process.stderr = Mock()
+                mock_process.communicate = Mock(return_value=("Success", ""))
+                mock_process.returncode = 0
                 mock_popen.return_value = mock_process
 
                 result = manager.execute_stack_command("stack1", "/path/to/compose.yml", "recreate")
@@ -678,6 +680,8 @@ class TestDockerManager:
             mock_process = Mock()
             mock_process.stdout = Mock()
             mock_process.stderr = Mock()
+            mock_process.communicate = Mock(return_value=("Success", ""))
+            mock_process.returncode = 0
             mock_popen.return_value = mock_process
 
             result = manager.execute_stack_command("stack1", "/path/to/compose.yml", "down")
@@ -739,6 +743,8 @@ class TestDockerManager:
             mock_process = Mock()
             mock_process.stdout = Mock()
             mock_process.stderr = Mock()
+            mock_process.communicate = Mock(return_value=("Success", ""))
+            mock_process.returncode = 0
             mock_popen.return_value = mock_process
 
             result = manager.execute_stack_command("stack1", "/path/to/compose.yml", "down:remove_volumes")

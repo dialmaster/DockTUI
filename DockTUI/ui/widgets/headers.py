@@ -438,7 +438,6 @@ class StackHeader(Static):
         total: int,
         can_recreate: bool = True,
         has_compose_file: bool = True,
-        operation_status: Optional[str] = None,
     ):
         """Initialize the stack header.
 
@@ -450,7 +449,6 @@ class StackHeader(Static):
             total: Total number of containers
             can_recreate: Whether the stack can be recreated (compose file accessible)
             has_compose_file: Whether a compose file path is defined
-            operation_status: Optional operation status (e.g., "Starting...", "Stopping...")
         """
         super().__init__("")
         self.stack_name = stack_name
@@ -461,7 +459,6 @@ class StackHeader(Static):
         self.config_file = config_file
         self.can_recreate = can_recreate
         self.has_compose_file = has_compose_file
-        self.operation_status = operation_status
         self.can_focus = True
         self._last_click_time = 0
         self._update_content()
@@ -474,11 +471,6 @@ class StackHeader(Static):
         status = Text.assemble(
             running_text, ", ", exited_text, f", Total: {self.total}"
         )
-
-        # Add operation status if present
-        if self.operation_status:
-            status.append("  ")
-            status.append(Text(f"[{self.operation_status}]", style="italic cyan"))
 
         # Add indicator if recreate is not available
         recreate_indicator = ""
@@ -509,15 +501,6 @@ class StackHeader(Static):
     def toggle(self) -> None:
         """Toggle the expanded/collapsed state of the stack."""
         self.expanded = not self.expanded
-        self._update_content()
-
-    def set_operation_status(self, status: Optional[str]) -> None:
-        """Update the operation status and refresh the display.
-
-        Args:
-            status: The operation status to display, or None to clear
-        """
-        self.operation_status = status
         self._update_content()
 
     def on_click(self) -> None:

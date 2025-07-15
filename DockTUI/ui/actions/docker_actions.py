@@ -128,7 +128,22 @@ class DockerActions:
                     self.container_list.update_container_status(
                         item_id, status_map[command]
                     )
-                    self.refresh()
+
+                    # Force immediate UI update by updating the container's row
+                    if self.container_list.selected_container_data:
+                        # Update the container data with the new status
+                        container_data = (
+                            self.container_list.selected_container_data.copy()
+                        )
+                        container_data["status"] = status_map[command]
+
+                        # Find the stack this container belongs to
+                        stack_name = container_data.get("stack", "ungrouped")
+
+                        # Update the container in the stack table immediately
+                        self.container_list.stack_manager.add_container_to_stack(
+                            stack_name, container_data
+                        )
 
                 # Execute command in background thread
                 def execute_and_clear():
@@ -159,46 +174,7 @@ class DockerActions:
                         "config_file", ""
                     )
 
-                    # Set up status message
-                    status_map = {
-                        "start": "Starting...",
-                        "stop": "Stopping...",
-                        "restart": "Restarting...",
-                        "recreate": "Recreating...",
-                        "down": "Taking down...",
-                        "down_remove_volumes": "Taking down (with volumes)...",
-                    }
-
-                    # Get the appropriate status message
-                    if command.startswith("down"):
-                        status_key = (
-                            "down_remove_volumes"
-                            if "remove_volumes" in command
-                            else "down"
-                        )
-                    else:
-                        status_key = command
-
-                    status_message = status_map.get(
-                        status_key, f"{command.capitalize()}ing..."
-                    )
-
-                    # Update UI immediately with operation status
-                    self.container_list.set_stack_status(stack_name, status_message)
-
-                    # Update the stack header directly if it exists
-                    if (
-                        hasattr(self.container_list, "stack_manager")
-                        and stack_name
-                        in self.container_list.stack_manager.stack_headers
-                    ):
-                        header = self.container_list.stack_manager.stack_headers[
-                            stack_name
-                        ]
-                        header.operation_status = status_message
-                        header._update_content()
-
-                    # Also set status for all containers in the stack
+                    # Set status for all containers in the stack
                     # Extract the base command (remove :remove_volumes suffix if present)
                     base_command = command.split(":")[0] if ":" in command else command
                     self.container_list.set_stack_containers_status(
@@ -212,10 +188,6 @@ class DockerActions:
                     def execute_and_clear():
                         success = self.docker.execute_stack_command(
                             stack_name, config_file, command
-                        )
-                        # Clear stack status immediately
-                        self.call_from_thread(
-                            self.container_list.clear_stack_status, stack_name
                         )
                         # Container statuses will auto-clear when they're no longer relevant
                         # (handled in stack_manager.py based on actual container state)
