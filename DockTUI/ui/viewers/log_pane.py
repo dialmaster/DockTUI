@@ -393,9 +393,9 @@ class LogPane(Vertical):
         current_filter = self.log_filter_manager.get_current_filter()
         if isinstance(self.log_display, RichLogViewer):
             self.log_display.set_filter(current_filter)
-
-            # Use the new refilter method that preserves LogLine objects
+            self.log_display.set_log_filter(self.log_filter_manager.log_filter)
             self.log_display.refilter_existing_lines()
+            self._auto_scroll_to_bottom()
 
             # Check if we have any visible lines after filtering
             if (

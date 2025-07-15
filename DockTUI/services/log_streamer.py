@@ -183,21 +183,31 @@ class LogStreamer:
                 if self.stop_event.is_set():
                     break
 
-                # Decode and strip the line
+                # Decode the line
                 if isinstance(line, bytes):
                     line = line.decode("utf-8", errors="replace")
-                line = line.rstrip()
 
-                # Check if line was empty before ANSI stripping
-                was_empty_before_ansi = not line
+                # Strip only trailing newlines, preserve internal \r for splitting
+                line = line.rstrip("\n")
 
-                # Strip ANSI escape codes to prevent text selection issues
-                line = strip_ansi_codes(line)
+                # Split on carriage returns to handle progress updates
+                # Each segment becomes a separate log line
+                segments = line.split("\r")
 
-                # Include the line if it was originally not empty OR if it was empty before ANSI stripping
-                if line or was_empty_before_ansi:
-                    line_count += 1
-                    self.log_queue.put((session_id, "log", line))
+                for segment in segments:
+                    # Expand tabs to spaces (use 4 spaces per tab)
+                    segment = segment.expandtabs(4)
+
+                    # Check if segment was empty before ANSI stripping
+                    was_empty_before_ansi = not segment
+
+                    # Strip ANSI escape codes to prevent text selection issues
+                    cleaned_segment = strip_ansi_codes(segment)
+
+                    # Include the segment if it was originally not empty OR if it was empty before ANSI stripping
+                    if cleaned_segment or was_empty_before_ansi:
+                        line_count += 1
+                        self.log_queue.put((session_id, "log", cleaned_segment))
 
         except docker.errors.NotFound:
             self.log_queue.put(
@@ -298,22 +308,32 @@ class LogStreamer:
                         if self.stop_event.is_set():
                             break
 
-                        # Decode and strip the line
+                        # Decode the line
                         if isinstance(line, bytes):
                             line = line.decode("utf-8", errors="replace")
-                        line = line.rstrip()
 
-                        # Check if line was empty before ANSI stripping
-                        was_empty_before_ansi = not line
+                        # Strip only trailing newlines, preserve internal \r for splitting
+                        line = line.rstrip("\n")
 
-                        # Strip ANSI escape codes to prevent text selection issues
-                        line = strip_ansi_codes(line)
+                        # Split on carriage returns to handle progress updates
+                        # Each segment becomes a separate log line
+                        segments = line.split("\r")
 
-                        # Include the line if it was originally not empty OR if it was empty before ANSI stripping
-                        if line or was_empty_before_ansi:
-                            # Prefix with container name for stack logs
-                            prefixed_line = f"[{name}] {line}"
-                            combined_queue.put(prefixed_line)
+                        for segment in segments:
+                            # Expand tabs to spaces (use 4 spaces per tab)
+                            segment = segment.expandtabs(4)
+
+                            # Check if segment was empty before ANSI stripping
+                            was_empty_before_ansi = not segment
+
+                            # Strip ANSI escape codes to prevent text selection issues
+                            cleaned_segment = strip_ansi_codes(segment)
+
+                            # Include the segment if it was originally not empty OR if it was empty before ANSI stripping
+                            if cleaned_segment or was_empty_before_ansi:
+                                # Prefix with container name for stack logs
+                                prefixed_line = f"[{name}] {cleaned_segment}"
+                                combined_queue.put(prefixed_line)
                 except Exception as e:
                     logger.error(f"Error reading logs from {name}: {e}")
 
