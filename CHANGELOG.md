@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.8](https://github.com/dialmaster/DockTUI/compare/v0.2.7...v0.2.8) (2025-07-16)
+
+
+### Bug Fixes
+
+* improve log display handling for special characters and search ([75bca9d](https://github.com/dialmaster/DockTUI/commit/75bca9db68ac498dd97ef116d7b360e95edcf24c))
+* improve log display handling for special characters and search ([6ed6f89](https://github.com/dialmaster/DockTUI/commit/6ed6f89f897631306d4b7dd65a0caca4503fb625))
+* make status changes more responsive ([5612179](https://github.com/dialmaster/DockTUI/commit/56121794cbfc8110c208529dc4151cdba81e5a35))
+* make status changes more responsive ([30a0709](https://github.com/dialmaster/DockTUI/commit/30a070941db8da43436e94f878e2d260fdbde83d))
+
+
+### Documentation
+
+* add regex search documentation and tooltip ([2588251](https://github.com/dialmaster/DockTUI/commit/2588251786f11ec6098d8eb0cf1beb6ddfa90318))
+
 ## [0.2.7](https://github.com/dialmaster/DockTUI/compare/v0.2.6...v0.2.7) (2025-07-11)
 
 
