@@ -79,7 +79,11 @@ class LogPane(Vertical):
         self.header = Static("📋 Log Pane - No Selection", classes="log-header")
 
         # Create controls
-        self.search_input = Input(placeholder="Filter logs...", id="search-input")
+        self.search_input = Input(
+            placeholder="Filter logs...",
+            id="search-input",
+            tooltip="Enter text to filter logs. Use /pattern/ for regex search",
+        )
         self.auto_follow_checkbox = Checkbox(
             "Follow", self.log_state_manager.auto_follow, id="auto-follow-checkbox"
         )

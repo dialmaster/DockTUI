@@ -108,7 +108,7 @@ If you want to contribute or run DockTUI without Docker, see [DEVELOPMENT.md](DE
 #### Interactive Features
 - **Click and drag** to select text
 - **Double-click** on JSON/XML lines to expand/collapse pretty-printed views
-- **Filter box** to search logs in real-time
+- **Filter box** to search logs in real-time (supports regex with `/pattern/` syntax)
 - **Auto-follow** checkbox to toggle automatic scrolling
 - **Mark Log Position** - Add timestamped markers to track important events
 
