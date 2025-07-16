@@ -79,7 +79,11 @@ class LogPane(Vertical):
         self.header = Static("📋 Log Pane - No Selection", classes="log-header")
 
         # Create controls
-        self.search_input = Input(placeholder="Filter logs...", id="search-input")
+        self.search_input = Input(
+            placeholder="Filter logs...",
+            id="search-input",
+            tooltip="Enter text to filter logs. Use /pattern/ for regex search",
+        )
         self.auto_follow_checkbox = Checkbox(
             "Follow", self.log_state_manager.auto_follow, id="auto-follow-checkbox"
         )
@@ -393,9 +397,9 @@ class LogPane(Vertical):
         current_filter = self.log_filter_manager.get_current_filter()
         if isinstance(self.log_display, RichLogViewer):
             self.log_display.set_filter(current_filter)
-
-            # Use the new refilter method that preserves LogLine objects
+            self.log_display.set_log_filter(self.log_filter_manager.log_filter)
             self.log_display.refilter_existing_lines()
+            self._auto_scroll_to_bottom()
 
             # Check if we have any visible lines after filtering
             if (

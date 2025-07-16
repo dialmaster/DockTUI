@@ -547,6 +547,7 @@ class TestRichLogViewer:
         log_line.is_system_message = False
         log_line.parsed_json = None
         log_line.parsed_xml = None
+        log_line.search_matches = []
         rich_log_viewer.visible_lines = [log_line]
 
         # Mock the virtual scroll manager to return our line with offset
@@ -578,6 +579,7 @@ class TestRichLogViewer:
         log_line.raw_text = '{"key": "value"}'
         log_line.parsed_json = {"key": "value"}
         log_line.parsed_xml = None
+        log_line.search_matches = []
         rich_log_viewer.visible_lines = [log_line]
 
         # Mark line as expanded

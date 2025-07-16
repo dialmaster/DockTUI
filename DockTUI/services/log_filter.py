@@ -1,5 +1,6 @@
+import re
 from collections import deque
-from typing import Deque, List
+from typing import Deque, List, Optional, Pattern, Tuple
 
 
 class LogFilter:
@@ -17,13 +18,19 @@ class LogFilter:
         self._search_filter_lower = ""  # Cached lowercase version
         self.filtered_line_count = 0
         self.marker_pattern = "------ MARKED "
-        self.pending_marker_context = 0  # Track lines to show after a marker
+        self.pending_marker_context = 0
+        self._is_regex = False
+        self._regex_pattern: Optional[Pattern[str]] = None
+        self._regex_valid = True
 
     def clear(self):
         """Clear all stored log lines."""
         self.all_log_lines.clear()
         self.filtered_line_count = 0
         self.pending_marker_context = 0
+        self._regex_pattern = None
+        self._is_regex = False
+        self._regex_valid = True
 
     def add_line(self, line: str):
         """Add a log line to the buffer.
@@ -46,12 +53,30 @@ class LogFilter:
         """Set the search filter.
 
         Args:
-            search_filter: The search string to filter logs
+            search_filter: The search string to filter logs.
+                         If enclosed in '/', it will be treated as a regex pattern.
         """
         self.search_filter = search_filter.strip()
-        self._search_filter_lower = (
-            self.search_filter.lower()
-        )  # Cache lowercase version
+
+        if (
+            len(self.search_filter) >= 2
+            and self.search_filter.startswith("/")
+            and self.search_filter.endswith("/")
+        ):
+            pattern = self.search_filter[1:-1]
+            self._is_regex = True
+
+            try:
+                self._regex_pattern = re.compile(pattern, re.IGNORECASE)
+                self._regex_valid = True
+            except re.error:
+                self._regex_pattern = None
+                self._regex_valid = False
+        else:
+            self._is_regex = False
+            self._regex_pattern = None
+            self._regex_valid = True
+            self._search_filter_lower = self.search_filter.lower()
 
     def get_filtered_lines(self) -> List[str]:
         """Get all log lines that match the current filter.
@@ -62,8 +87,7 @@ class LogFilter:
         self.filtered_line_count = 0
         filtered_lines = []
 
-        # If no filter, return all lines
-        if not self.search_filter:
+        if not self.search_filter or not self._regex_valid:
             self.filtered_line_count = len(self.all_log_lines)
             return list(self.all_log_lines)
 
@@ -81,10 +105,9 @@ class LogFilter:
 
             if is_marker:
                 should_include = True
-            elif self._search_filter_lower in line.lower():
+            elif self.matches_filter(line):
                 should_include = True
             else:
-                # Check if within 2 lines of any marker we've found so far
                 for marker_idx in marker_positions:
                     if abs(i - marker_idx) <= 2:
                         should_include = True
@@ -126,12 +149,15 @@ class LogFilter:
         Returns:
             True if the line matches the filter, False otherwise
         """
-        if not self.search_filter:
+        if not self.search_filter or not self._regex_valid:
             return True
-        # Always show marker lines
         if self.marker_pattern in line:
             return True
-        return self._search_filter_lower in line.lower()
+
+        if self._is_regex and self._regex_pattern:
+            return bool(self._regex_pattern.search(line))
+        else:
+            return self._search_filter_lower in line.lower()
 
     def should_show_line_with_context(self, line: str) -> bool:
         """Check if a line should be shown considering marker context.
@@ -197,3 +223,34 @@ class LogFilter:
             List of all stored log lines
         """
         return list(self.all_log_lines)
+
+    def find_match_positions(self, line: str) -> List[Tuple[int, int]]:
+        """Find all match positions in a line.
+
+        Args:
+            line: The line to search in
+
+        Returns:
+            List of (start, end) tuples for each match
+        """
+        if not self.search_filter or not self._regex_valid:
+            return []
+
+        matches = []
+
+        if self._is_regex and self._regex_pattern:
+            for match in self._regex_pattern.finditer(line):
+                matches.append((match.start(), match.end()))
+        else:
+            line_lower = line.lower()
+            search_len = len(self._search_filter_lower)
+            start = 0
+
+            while True:
+                pos = line_lower.find(self._search_filter_lower, start)
+                if pos == -1:
+                    break
+                matches.append((pos, pos + search_len))
+                start = pos + 1
+
+        return matches

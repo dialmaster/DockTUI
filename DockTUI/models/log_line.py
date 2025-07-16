@@ -38,8 +38,9 @@ class LogLine(CacheableMixin):
     pattern_matches: List[Tuple[str, int, int]] = field(default_factory=list)
 
     # Store specific match positions for commonly used patterns
-    timestamp_pos: Optional[Tuple[int, int]] = None  # (start, end) positions
-    log_level_pos: Optional[Tuple[int, int]] = None  # (start, end) positions
+    timestamp_pos: Optional[Tuple[int, int]] = None
+    log_level_pos: Optional[Tuple[int, int]] = None
+    search_matches: List[Tuple[int, int]] = field(default_factory=list)
 
     # Lazy parsing support
     _is_parsed: bool = field(default=False, init=False)
@@ -61,6 +62,15 @@ class LogLine(CacheableMixin):
             end: End position in the raw text
         """
         self.pattern_matches.append((pattern_type, start, end))
+
+    def set_search_matches(self, matches: List[Tuple[int, int]]) -> None:
+        """Set search match positions for highlighting.
+
+        Args:
+            matches: List of (start, end) tuples for search matches
+        """
+        self.search_matches = matches
+        self.invalidate_cache()
 
     def ensure_parsed(self) -> None:
         """Ensure this log line has been parsed. Called on-demand during rendering."""

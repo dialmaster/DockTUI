@@ -1023,10 +1023,14 @@ class TestLogPane:
         log_pane.log_filter_manager.get_current_filter = Mock(return_value="test")
         log_pane.log_filter_manager.has_filter = Mock(return_value=True)
         
+        # Mock log_state_manager to prevent auto-scroll
+        log_pane.log_state_manager.should_auto_scroll = Mock(return_value=False)
+        
         # Set up RichLogViewer with the necessary methods
         from DockTUI.ui.widgets.rich_log_viewer import RichLogViewer
         log_pane.log_display.__class__ = RichLogViewer  # Make isinstance check pass
         log_pane.log_display.set_filter = Mock()
+        log_pane.log_display.set_log_filter = Mock()
         log_pane.log_display.refilter_existing_lines = Mock()
         log_pane.log_display.visible_lines = []  # No matches
         

@@ -40,6 +40,7 @@ class LogFormatter:
         "json_number": Style(color="yellow"),
         "marked": Style(color="white", bgcolor="purple", bold=True),
         "selection": Style(bgcolor="grey35"),
+        "search_match": Style(reverse=True),
         "text": Style(),
     }
 

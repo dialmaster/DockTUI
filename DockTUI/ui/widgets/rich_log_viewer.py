@@ -95,6 +95,7 @@ class RichLogViewer(ScrollView):
         )
 
         self.current_filter: str = ""
+        self._log_filter = None
         self.line_height = 1
 
         self._line_cache: OrderedDict[int, List[Segment]] = OrderedDict()
@@ -217,12 +218,27 @@ class RichLogViewer(ScrollView):
         # Find which log line corresponds to this virtual_y
         line_info = self._get_line_at_virtual_y(virtual_y)
         if not line_info:
-            return Strip.blank(self.size.width)
+            # Use max of widget width and virtual width to ensure full clearing
+            blank_width = max(self.size.width, self.virtual_size.width)
+            # Empty space at the bottom should not be zebra striped
+            from rich.segment import Segment
+            from rich.style import Style
+
+            # Create a strip filled with spaces with no background
+            segments = [Segment(" " * blank_width, Style())]
+            return Strip(segments, blank_width)
 
         log_line, line_offset = line_info
 
-        # Check cache first
-        cache_key = (log_line.line_number, line_offset, log_line.is_expanded)
+        search_matches_hash = (
+            hash(tuple(log_line.search_matches)) if log_line.search_matches else 0
+        )
+        cache_key = (
+            log_line.line_number,
+            line_offset,
+            log_line.is_expanded,
+            search_matches_hash,
+        )
         cached_segments = self._get_cached_segments(cache_key)
 
         # Use the renderer to render the line
@@ -480,11 +496,22 @@ class RichLogViewer(ScrollView):
         """
         with self._lock:
             self.current_filter = filter_text.lower()
+            self._log_filter = None
+
+    def set_log_filter(self, log_filter) -> None:
+        """Set the LogFilter instance for match position tracking.
+
+        Args:
+            log_filter: LogFilter instance to use for filtering and match positions
+        """
+        with self._lock:
+            self._log_filter = log_filter
 
     def refilter_existing_lines(self) -> None:
         """Refilter the existing log lines based on current filter."""
         with self._lock:
-            # Refilter all existing lines
+            self._line_cache.clear()
+
             if self.current_filter:
                 # Find all marker positions first
                 marker_positions = []
@@ -492,22 +519,17 @@ class RichLogViewer(ScrollView):
                     if line.is_marked:
                         marker_positions.append(i)
 
-                # Filter lines with marker context
                 self.visible_lines = []
                 for i, line in enumerate(self.log_lines):
                     should_show = False
 
-                    # Always show marked lines
                     if line.is_marked:
                         should_show = True
-                    # Always show system messages
                     elif line.is_system_message:
                         should_show = True
-                    # Check if matches filter
-                    elif self.current_filter in line.raw_text.lower():
+                    elif self._should_show_line_by_filter(line):
                         should_show = True
                     else:
-                        # Check if within 2 lines of a marker
                         for marker_idx in marker_positions:
                             if abs(i - marker_idx) <= 2:
                                 should_show = True
@@ -515,21 +537,24 @@ class RichLogViewer(ScrollView):
 
                     if should_show:
                         self.visible_lines.append(line)
+                    else:
+                        if line.search_matches:
+                            line.set_search_matches([])
             else:
-                # No filter - show all lines
                 self.visible_lines = self.log_lines.copy()
+                for line in self.log_lines:
+                    if line.search_matches:
+                        line.set_search_matches([])
 
             self._invalidate_virtual_size_immediate()
 
         # Workaround for Textual scrollbar update delay (GitHub issues #5631, #5632)
-        # Force scrollbar to update immediately using multiple techniques
-
-        # First, do an immediate refresh with layout
         self.refresh(layout=True)
 
-        # Then schedule additional updates after refresh
+        if self.auto_follow:
+            self.call_after_refresh(self.scroll_end)
+
         def force_scrollbar_update():
-            # Access virtual size to ensure it's calculated
             _ = self.virtual_size
             # Slightly modify scroll position to force full recalculation
             current_y = self.scroll_offset.y
@@ -549,16 +574,53 @@ class RichLogViewer(ScrollView):
         if not self.current_filter:
             return True
 
-        # Always show marked lines
         if log_line.is_marked:
             return True
 
-        # Always show system messages
         if log_line.is_system_message:
             return True
 
-        # Check if filter text is in the line
-        return self.current_filter in log_line.raw_text.lower()
+        return self._should_show_line_by_filter(log_line)
+
+    def _should_show_line_by_filter(self, log_line: LogLine) -> bool:
+        """Check if a line matches the filter and update match positions.
+
+        Args:
+            log_line: The log line to check
+
+        Returns:
+            True if the line matches the filter
+        """
+        if not self.current_filter:
+            return True
+
+        if self._log_filter:
+            matches = self._log_filter.matches_filter(log_line.raw_text)
+            if matches:
+                match_positions = self._log_filter.find_match_positions(
+                    log_line.raw_text
+                )
+                log_line.set_search_matches(match_positions)
+            else:
+                log_line.set_search_matches([])
+            return matches
+        else:
+            matches = self.current_filter in log_line.raw_text.lower()
+            if matches:
+                positions = []
+                text_lower = log_line.raw_text.lower()
+                search_len = len(self.current_filter)
+                start = 0
+                while True:
+                    pos = text_lower.find(self.current_filter, start)
+                    if pos == -1:
+                        break
+                    positions.append((pos, pos + search_len))
+                    start = pos + 1
+                log_line.set_search_matches(positions)
+            else:
+                log_line.set_search_matches([])
+            return matches
 
     def get_selected_text(self) -> str:
         """Get the currently selected text."""

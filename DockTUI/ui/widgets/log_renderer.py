@@ -82,7 +82,22 @@ class LogRenderer:
             # Generate segments based on line type
             segments = self._generate_segments(log_line, line_offset, zebra_stripe)
 
-        # Apply selection if needed
+        if hasattr(log_line, "search_matches") and log_line.search_matches:
+            adjusted_matches = log_line.search_matches
+            if line_offset == 0 and not log_line.is_expanded:
+                has_emoji = False
+                if log_line.has_json and log_line.json_start_pos is not None:
+                    has_emoji = True
+                elif log_line.has_xml and log_line.xml_start_pos is not None:
+                    has_emoji = True
+
+                if has_emoji:
+                    adjusted_matches = [
+                        (start + 2, end + 2) for start, end in log_line.search_matches
+                    ]
+
+            segments = self._apply_search_highlighting(segments, adjusted_matches)
+
         if self.selection_manager.has_selection():
             segments = self._apply_selection_to_segments(
                 segments, virtual_y, log_line, line_offset
@@ -91,14 +106,16 @@ class LogRenderer:
         # Create strip from segments
         strip = Strip(segments)
 
-        # Extend strip to virtual width for proper scrolling
-        if strip.cell_length < virtual_width:
+        # Always extend to at least widget width to ensure full clearing
+        width = widget_size.width if widget_size else 80
+        min_width = max(virtual_width, width)
+
+        if strip.cell_length < min_width:
             bg_style = self._get_background_style(log_line, zebra_stripe)
-            strip = strip.extend_cell_length(virtual_width, bg_style)
+            strip = strip.extend_cell_length(min_width, bg_style)
 
         # Crop for horizontal scrolling
         scroll_x = int(scroll_offset_x)
-        width = widget_size.width if widget_size else 80
         cropped_strip = strip.crop(scroll_x, scroll_x + width)
 
         return cropped_strip, segments
@@ -199,12 +216,12 @@ class LogRenderer:
             # Add separator line between JSON objects
             if i > 0:
                 if line_offset == current_offset:
-                    # Return an empty line as separator
-                    segments = [Segment("", Style())]
-                    if zebra_stripe:
-                        segments = self.formatter.apply_zebra_stripe(
-                            segments, log_line.line_number
-                        )
+                    # Return a line filled with spaces as separator
+                    # This ensures proper background rendering
+                    bg_style = self._get_background_style(log_line, zebra_stripe)
+                    segments = [
+                        Segment(" " * 80, bg_style)
+                    ]  # Use a reasonable default width
                     return segments
                 current_offset += 1
 
@@ -287,6 +304,62 @@ class LogRenderer:
 
         # Apply selection formatting
         return self.formatter.apply_selection(segments, line_text, sel_start, sel_end)
+
+    def _apply_search_highlighting(
+        self, segments: List[Segment], search_matches: List[Tuple[int, int]]
+    ) -> List[Segment]:
+        """Apply search match highlighting to segments.
+
+        Args:
+            segments: The segments to apply highlighting to
+            search_matches: List of (start, end) positions for matches
+
+        Returns:
+            Segments with search highlighting applied
+        """
+        if not search_matches:
+            return segments
+
+        result = []
+        current_pos = 0
+
+        for segment in segments:
+            seg_start = current_pos
+            seg_end = current_pos + len(segment.text)
+
+            segment_pieces = []
+            piece_start = 0
+
+            for match_start, match_end in search_matches:
+                if match_end <= seg_start or match_start >= seg_end:
+                    continue
+
+                overlap_start = max(0, match_start - seg_start)
+                overlap_end = min(len(segment.text), match_end - seg_start)
+
+                if overlap_start > piece_start:
+                    segment_pieces.append((piece_start, overlap_start, False))
+
+                segment_pieces.append((overlap_start, overlap_end, True))
+                piece_start = overlap_end
+
+            if piece_start < len(segment.text):
+                segment_pieces.append((piece_start, len(segment.text), False))
+
+            for start, end, is_match in segment_pieces:
+                text = segment.text[start:end]
+                if is_match:
+                    search_style = self.formatter.STYLES["search_match"]
+                    combined_style = (
+                        segment.style + search_style if segment.style else search_style
+                    )
+                    result.append(Segment(text, combined_style))
+                else:
+                    result.append(Segment(text, segment.style))
+
+            current_pos = seg_end
+
+        return result
 
     def _get_background_style(self, log_line: LogLine, zebra_stripe: bool) -> Style:
         """Get the background style for a log line.
