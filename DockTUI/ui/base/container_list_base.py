@@ -12,6 +12,72 @@ from ..widgets.headers import NetworkHeader, SectionHeader, StackHeader, VolumeH
 
 logger = logging.getLogger("DockTUI.container_list")
 
+# Colors for container text based on status
+EXITED_CONTAINER_TEXT_COLOR = "rgb(228,32,32)"  # Red
+RUNNING_CONTAINER_TEXT_COLOR = "rgb(32,228,32)"  # Green
+TRANSITION_CONTAINER_TEXT_COLOR = "rgb(228,228,32)"  # Yellow
+
+
+class ContainerText:
+    """A wrapper that acts like a string but renders with color based on container status."""
+
+    def __init__(self, text: str, status: str = ""):
+        self._text = str(text)
+        self._status = status.lower()
+
+    def __str__(self):
+        return self._text
+
+    def __repr__(self):
+        return self._text
+
+    def __eq__(self, other):
+        if isinstance(other, str):
+            return self._text == other
+        if isinstance(other, ContainerText):
+            return self._text == getattr(other, "_text", other)
+        return False
+
+    def __hash__(self):
+        return hash(self._text)
+
+    def __rich__(self):
+        """Rich protocol to render with color."""
+        from rich.text import Text
+
+        # Determine color based on status
+        if self._status == "exited":
+            style = EXITED_CONTAINER_TEXT_COLOR
+        elif self._status == "running":
+            style = RUNNING_CONTAINER_TEXT_COLOR
+        elif self._status in [
+            "starting",
+            "stopping",
+            "restarting",
+            "recreating",
+            "starting...",
+            "stopping...",
+            "restarting...",
+            "recreating...",
+        ]:
+            style = TRANSITION_CONTAINER_TEXT_COLOR
+        else:
+            # Default to no special style
+            return Text(self._text)
+
+        # Create a Text object with no_wrap to preserve styling
+        text = Text(self._text, style=style)
+        text.no_wrap = True
+        return text
+
+
+class ContainerDataTable(DataTable):
+    """Custom DataTable for displaying container information.
+
+    Container styling is handled by ContainerText objects which include
+    their own status information (is_exited flag).
+    """
+
 
 class SelectionChanged(Message):
     """Message sent when the selection changes in the container list."""
@@ -162,28 +228,25 @@ class ContainerListBase(VerticalScroll):
     /* Hide cursor by default on all tables */
     DataTable > .datatable--cursor {
         background: transparent !important;
-        color: $text !important;
         text-style: none !important;
     }
 
     /* Show cursor only on tables with selected items */
     DataTable.has-selection > .datatable--cursor {
         background: $primary-darken-2 !important;
-        color: $text !important;
         text-style: none !important;
     }
 
     /* Brighter cursor when focused table has selection */
     DataTable.has-selection:focus > .datatable--cursor {
         background: $primary !important;
-        color: $text !important;
         text-style: none !important;
     }
+    
 
     /* Style for row hover */
     DataTable > .datatable--row:hover {
         background: $primary-darken-2;
-        color: $text;
     }
     """
 
@@ -337,6 +400,8 @@ class ContainerListBase(VerticalScroll):
         table.can_focus = True
         table.show_cursor = True
         table.watch_cursor = True
+        # Preserve rich text colors when cursor is on the row
+        table.cursor_foreground_priority = "renderable"
 
         return table
 
@@ -349,7 +414,8 @@ class ContainerListBase(VerticalScroll):
         Returns:
             DataTable: A configured table for displaying container information
         """
-        table = DataTable()
+        logger.debug(f"Creating ContainerDataTable for stack {stack_name}")
+        table = ContainerDataTable()
         table.add_columns(
             "ID", "Name", "Status", "Uptime", "CPU %", "Memory", "PIDs", "Ports"
         )
@@ -360,6 +426,8 @@ class ContainerListBase(VerticalScroll):
         table.can_focus = True
         table.show_cursor = True
         table.watch_cursor = True
+        # Preserve rich text colors when cursor is on the row
+        table.cursor_foreground_priority = "renderable"
 
         return table
 

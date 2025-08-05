@@ -7,7 +7,6 @@ from textual.containers import Container, Horizontal, Vertical
 from textual.widgets import Button, Checkbox, Input, Label, Select, Static
 
 from ...config import config
-from ...utils.clipboard import copy_to_clipboard_async
 from ..widgets.rich_log_viewer import RichLogViewer
 from .log_filter_manager import LogFilterManager
 from .log_pane_styles import (
@@ -27,8 +26,8 @@ class LogPane(Vertical):
     """A pane that displays real-time Docker logs for selected containers or stacks."""
 
     BINDINGS = [
-        Binding("ctrl+shift+c", "copy_selection", "Copy selected text", show=False),
-        Binding("ctrl+a", "select_all", "Select all text", show=False),
+        Binding("c", "copy_selection", "Copy selected text", show=False),
+        Binding("a", "select_all", "Select all text", show=False),
     ]
 
     DEFAULT_CSS = LOG_PANE_CSS
@@ -139,7 +138,7 @@ class LogPane(Vertical):
 
         # Footer with instructions
         yield Static(
-            "📋 Double-click to expand JSON/XML • Click+drag to select • Right-click to copy",
+            "📋 Double-click to expand JSON/XML • Click+drag to select • Right-click or 'c' to copy",
             classes="log-footer",
         )
 
@@ -195,6 +194,8 @@ class LogPane(Vertical):
                     logger.info(
                         f"Stack '{item_id}' containers status changed, refreshing logs"
                     )
+                    # Update the stored data to prevent detecting the same change again
+                    self.log_state_manager.current_item_data = item_data
                     # Force restart logs to pick up new container states
                     self._clear_logs()
                     self._set_log_text(
@@ -476,32 +477,14 @@ class LogPane(Vertical):
     def action_copy_selection(self):
         """Copy the selected text to the clipboard."""
         if self.log_display.display:
-            selection = self.log_display.selected_text
-            if selection:
-
-                def on_copy_complete(success):
-                    if success:
-                        logger.info(f"Copied {len(selection)} characters to clipboard")
-                        self.app.notify(
-                            "Text copied to clipboard",
-                            severity="information",
-                            timeout=2,
-                        )
-                    else:
-                        logger.error("Failed to copy to clipboard")
-                        self.app.notify(
-                            "Failed to copy to clipboard. Please install xclip or pyperclip.",
-                            severity="error",
-                            timeout=3,
-                        )
-
-                # Copy in background thread
-                copy_to_clipboard_async(selection, on_copy_complete)
+            # Delegate to RichLogViewer's copy action to ensure consistent behavior
+            self.log_display.action_copy_selection()
 
     def action_select_all(self):
         """Select all text in the log display."""
         if self.log_display.display:
-            self.log_display.select_all()
+            # Delegate to RichLogViewer's select all action to ensure consistent behavior
+            self.log_display.action_select_all()
 
     def on_button_pressed(self, event):
         """Handle button presses."""

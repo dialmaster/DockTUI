@@ -193,9 +193,13 @@ class TestStackManager(unittest.TestCase):
 
         self.manager.add_container_to_stack("test-stack", container_data)
 
-        # Check PIDs shows as N/A
+        # Check PIDs shows as N/A and status
         args = mock_table.add_row.call_args[0]
-        self.assertEqual(args[6], "N/A")
+        
+        # With the new approach, ContainerText objects are used for all containers
+        # Since we're using ContainerText, we need to convert to string for comparison
+        self.assertEqual(str(args[6]), "N/A")  # PIDs column
+        self.assertEqual(str(args[2]), "exited")  # Status column
 
     def test_add_container_to_stack_status_override(self):
         """Test adding container with status override."""

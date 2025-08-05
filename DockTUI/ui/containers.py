@@ -761,7 +761,7 @@ class ContainerList(ContainerListBase):
                 try:
                     row = table.get_row_index(row_key)
                     if row is not None and row < table.row_count:
-                        container_id = table.get_cell_at((row, 0))
+                        container_id = str(table.get_cell_at((row, 0)))
                         self.select_container(container_id)
                 except Exception as e:
                     logger.error(
