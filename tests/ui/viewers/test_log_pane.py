@@ -51,6 +51,20 @@ class MockLogTextArea:
         """Mock clear method."""
         self.text = ""
         self.document.end = (0, 0)
+    
+    def get_selected_text(self):
+        """Mock get_selected_text method for RichLogViewer compatibility."""
+        return getattr(self, 'selected_text', '')
+    
+    def action_copy_selection(self):
+        """Mock action_copy_selection method for RichLogViewer compatibility."""
+        # This mock will be configured in individual tests
+        pass
+    
+    def action_select_all(self):
+        """Mock action_select_all method for RichLogViewer compatibility."""
+        # This mock will be configured in individual tests
+        pass
 
 
 class TestLogPane:
@@ -590,6 +604,9 @@ class TestLogPane:
         log_pane._set_log_text.assert_called_once_with("Stack container status changed. Refreshing logs...\n")
         log_pane._start_logs.assert_called_once()
         
+        # Verify the current_item_data was updated to prevent infinite loop
+        assert log_pane.log_state_manager.current_item_data == {"name": "mystack", "running": 3, "exited": 0}
+        
     def test_check_stack_containers_status_changed(self, log_pane):
         """Test the _check_stack_containers_status_changed method."""
         # Set initial stack data
@@ -791,62 +808,37 @@ class TestLogPane:
         """Test copying selected text to clipboard."""
         # Set up selected text
         log_pane.log_display.display = True
-        log_pane.log_display.selected_text = "Selected text to copy"
+        log_pane.log_display.action_copy_selection = Mock()
         
-        # Mock copy_to_clipboard_async
-        with patch('DockTUI.ui.viewers.log_pane.copy_to_clipboard_async') as mock_copy:
-            # Call action_copy_selection
-            log_pane.action_copy_selection()
-            
-            # Should call copy_to_clipboard_async
-            mock_copy.assert_called_once()
-            args = mock_copy.call_args[0]
-            assert args[0] == "Selected text to copy"
-            # Get the callback function
-            callback = args[1]
-            
-            # Test success callback
-            callback(True)
-            log_pane.app.notify.assert_called_with(
-                "Text copied to clipboard",
-                severity="information",
-                timeout=2
-            )
-            
-            # Reset and test failure callback
-            log_pane.app.notify.reset_mock()
-            callback(False)
-            log_pane.app.notify.assert_called_with(
-                "Failed to copy to clipboard. Please install xclip or pyperclip.",
-                severity="error",
-                timeout=3
-            )
-            
-    def test_action_copy_selection_no_text(self, log_pane):
-        """Test copying with no selected text."""
-        # Set up no selected text
-        log_pane.log_display.display = True
-        log_pane.log_display.selected_text = ""
+        # Call action_copy_selection
+        log_pane.action_copy_selection()
         
-        # Mock copy_to_clipboard_async
-        with patch('DockTUI.ui.viewers.log_pane.copy_to_clipboard_async') as mock_copy:
-            # Call action_copy_selection
-            log_pane.action_copy_selection()
+        # Should delegate to log_display's action_copy_selection
+        log_pane.log_display.action_copy_selection.assert_called_once()
             
-            # Should not call copy_to_clipboard_async
-            mock_copy.assert_not_called()
+    def test_action_copy_selection_no_display(self, log_pane):
+        """Test copying when log display is not visible."""
+        # Set up log display as not visible
+        log_pane.log_display.display = False
+        log_pane.log_display.action_copy_selection = Mock()
+        
+        # Call action_copy_selection
+        log_pane.action_copy_selection()
+        
+        # Should not call action_copy_selection when display is False
+        log_pane.log_display.action_copy_selection.assert_not_called()
             
     def test_action_select_all(self, log_pane):
         """Test selecting all text in log display."""
         # Set up log display
         log_pane.log_display.display = True
-        log_pane.log_display.select_all = Mock()
+        log_pane.log_display.action_select_all = Mock()
         
         # Call action_select_all
         log_pane.action_select_all()
         
-        # Should call select_all on log display
-        log_pane.log_display.select_all.assert_called_once()
+        # Should delegate to log_display's action_select_all
+        log_pane.log_display.action_select_all.assert_called_once()
         
     def test_show_no_logs_message_for_item_type(self, log_pane):
         """Test showing no logs message for item types without logs."""

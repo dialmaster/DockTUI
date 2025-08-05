@@ -80,6 +80,8 @@ class DockerActions:
         """
         # Note: Validation is now done in is_action_applicable before calling this method
         item_type, item_id = self.container_list.selected_item
+        # Ensure item_id is a string (might be ContainerText from UI)
+        item_id = str(item_id)
         success = False
 
         # Track recreate operations so we can update log pane after refresh
@@ -282,6 +284,8 @@ class DockerActions:
                 return
 
             item_type, item_id = self.container_list.selected_item
+            # Ensure item_id is a string (might be ContainerText from UI)
+            item_id = str(item_id)
             if item_type != "image":
                 self.error_display.update("Selected item is not an image")
                 return
@@ -406,6 +410,8 @@ class DockerActions:
                     return
 
                 item_type, item_id = self.container_list.selected_item
+                # Ensure item_id is a string (might be ContainerText from UI)
+                item_id = str(item_id)
                 if item_type != "volume":
                     self.error_display.update("Selected item is not a volume")
                     with self._volume_operation_lock:

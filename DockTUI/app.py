@@ -332,6 +332,8 @@ class DockTUIApp(App, DockerActions, RefreshActions):
             return
 
         item_type, item_id = self.container_list.selected_item
+        # Ensure item_id is a string (might be ContainerText from UI)
+        item_id = str(item_id)
 
         # Only allow removing containers, not stacks
         if item_type != "container":
@@ -365,6 +367,8 @@ class DockTUIApp(App, DockerActions, RefreshActions):
             return
 
         item_type, item_id = self.container_list.selected_item
+        # Ensure item_id is a string (might be ContainerText from UI)
+        item_id = str(item_id)
 
         # Get stack name for the modal
         stack_name = "unknown"
@@ -418,6 +422,8 @@ class DockTUIApp(App, DockerActions, RefreshActions):
             return
 
         item_type, item_id = self.container_list.selected_item
+        # Ensure item_id is a string (might be ContainerText from UI)
+        item_id = str(item_id)
 
         # Handle container removal
         if item_type == "container":
@@ -474,6 +480,8 @@ class DockTUIApp(App, DockerActions, RefreshActions):
             return
 
         item_type, item_id = self.container_list.selected_item
+        # Ensure item_id is a string (might be ContainerText from UI)
+        item_id = str(item_id)
         if item_type != "image":
             self.error_display.update("Selected item is not an image")
             return

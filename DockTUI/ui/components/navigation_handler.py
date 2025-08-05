@@ -65,7 +65,7 @@ class NavigationHandler:
             row = table.cursor_row
             stack_name = self._find_table_stack(table)
             if stack_name:
-                container_id = table.get_cell_at((row, 0))
+                container_id = str(table.get_cell_at((row, 0)))
                 self.container_list.select_container(container_id)
 
     def _handle_table_down(self, table: DataTable) -> None:
@@ -91,7 +91,7 @@ class NavigationHandler:
             row = table.cursor_row
             stack_name = self._find_table_stack(table)
             if stack_name:
-                container_id = table.get_cell_at((row, 0))
+                container_id = str(table.get_cell_at((row, 0)))
                 self.container_list.select_container(container_id)
 
     def _handle_header_up(self, current: StackHeader) -> None:
@@ -107,7 +107,9 @@ class NavigationHandler:
                 prev_table.focus()
                 prev_table.move_cursor(row=prev_table.row_count - 1)
                 # Update selection to the container
-                container_id = prev_table.get_cell_at((prev_table.row_count - 1, 0))
+                container_id = str(
+                    prev_table.get_cell_at((prev_table.row_count - 1, 0))
+                )
                 self.container_list.select_container(container_id)
             else:
                 prev_header.focus()

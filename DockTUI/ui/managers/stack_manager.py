@@ -6,7 +6,7 @@ from typing import Dict, Optional, Tuple
 from textual.containers import Container
 from textual.widgets import DataTable
 
-from ..base.container_list_base import SelectionChanged
+from ..base.container_list_base import ContainerText, SelectionChanged
 from ..widgets.headers import StackHeader
 
 logger = logging.getLogger("DockTUI.stack_manager")
@@ -195,15 +195,20 @@ class StackManager:
                 ):
                     del self.parent._status_override_times[container_id]
 
+        # Get the container status for styling
+        # Note: 'status' variable might have override values like "restarting...", so we use that
+        container_status = status.lower()
+
+        # Create row data - use ContainerText with status for color styling
         row_data = (
-            container_data["id"],
-            container_data["name"],
-            status,
-            container_data.get("uptime", "N/A"),
-            container_data["cpu"],
-            container_data["memory"],
-            pids_display,
-            container_data["ports"],
+            ContainerText(container_data["id"], container_status),
+            ContainerText(container_data["name"], container_status),
+            ContainerText(status, container_status),
+            ContainerText(container_data.get("uptime", "N/A"), container_status),
+            ContainerText(container_data["cpu"], container_status),
+            ContainerText(container_data["memory"], container_status),
+            ContainerText(pids_display, container_status),
+            ContainerText(container_data["ports"], container_status),
         )
 
         # Cache the full container data
@@ -225,6 +230,9 @@ class StackManager:
                 row_key = table.row_count
                 table.add_row(*row_data, key=container_id)
                 self.container_rows[container_id] = (stack_name, row_key)
+
+                # Log container status for debugging
+                logger.debug(f"Container {container_id}: status={status}")
 
                 # Check if this was the previously selected row
                 if hasattr(self, "_pending_selection") and self._pending_selection:
@@ -268,6 +276,7 @@ class StackManager:
                         row_key = table.row_count
                         table.add_row(*row_data, key=container_id)
                         self.container_rows[container_id] = (stack_name, row_key)
+
                     else:
                         # Update the existing row in the same stack
                         try:
@@ -360,6 +369,7 @@ class StackManager:
                                     stack_name,
                                     table.row_count - 1,
                                 )
+
                         except Exception as e:
                             logger.error(
                                 f"Error updating container {container_id}: {str(e)}",
@@ -368,7 +378,7 @@ class StackManager:
                 else:
                     # Add as a new row
                     row_key = table.row_count
-                    table.add_row(*row_data)
+                    table.add_row(*row_data, key=container_id)
                     self.container_rows[container_id] = (stack_name, row_key)
 
         except Exception as e:
@@ -474,6 +484,8 @@ class StackManager:
         Args:
             container_id: ID of the container to select
         """
+        # Ensure container_id is a string (might be ContainerText from UI)
+        container_id = str(container_id)
         logger.debug(f"select_container called with container_id: {container_id}")
         if container_id in self.container_rows:
             # Clear all selections using the shared method
@@ -504,15 +516,16 @@ class StackManager:
                 container_data["stack"] = stack_name
             else:
                 # Fallback to getting data from the table
+                # Convert to strings in case they are ContainerText objects
                 container_data = {
-                    "id": table.get_cell_at((row_idx, 0)),
-                    "name": table.get_cell_at((row_idx, 1)),
-                    "status": table.get_cell_at((row_idx, 2)),
-                    "uptime": table.get_cell_at((row_idx, 3)),
-                    "cpu": table.get_cell_at((row_idx, 4)),
-                    "memory": table.get_cell_at((row_idx, 5)),
-                    "pids": table.get_cell_at((row_idx, 6)),
-                    "ports": table.get_cell_at((row_idx, 7)),
+                    "id": str(table.get_cell_at((row_idx, 0))),
+                    "name": str(table.get_cell_at((row_idx, 1))),
+                    "status": str(table.get_cell_at((row_idx, 2))),
+                    "uptime": str(table.get_cell_at((row_idx, 3))),
+                    "cpu": str(table.get_cell_at((row_idx, 4))),
+                    "memory": str(table.get_cell_at((row_idx, 5))),
+                    "pids": str(table.get_cell_at((row_idx, 6))),
+                    "ports": str(table.get_cell_at((row_idx, 7))),
                     "stack": stack_name,
                 }
 
