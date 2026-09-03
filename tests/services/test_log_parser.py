@@ -302,15 +302,14 @@ class TestLogParser:
         with patch.object(parser._patterns, 'get_pattern') as mock_get:
             # Mock a pyparsing pattern
             mock_pattern = Mock()
-            mock_pattern.scanString.return_value = [(['ERROR'], 0, 5)]
-            mock_pattern.searchString = None  # Not a regex
+            mock_pattern.scan_string.return_value = [(['ERROR'], 0, 5)]
             mock_get.return_value = mock_pattern
-            
+
             text = "ERROR: Test message"
             log_line = parser.parse_line(text, 1)
-            
-            # Should have called scanString for pyparsing pattern
-            mock_pattern.scanString.assert_called()
+
+            # Should have called scan_string for pyparsing pattern
+            mock_pattern.scan_string.assert_called()
 
     def test_pattern_matching_with_regex(self, parser):
         """Test pattern matching with regex fallback."""

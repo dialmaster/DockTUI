@@ -175,8 +175,11 @@ else
     DOCKER_CMD="$DOCKER_CMD -v $DOCKER_SOCKET:/var/run/docker.sock"
 fi
 
-DOCKER_CMD="$DOCKER_CMD -v /:/host:ro"  # Mount entire filesystem read-only for compose files
-DOCKER_CMD="$DOCKER_CMD -v $HOME:$HOME:ro"  # Mount home directory for better compatibility
+# Mount the host filesystem read-only so compose files anywhere on the host can
+# be read; DockTUI translates the daemon's host paths through DOCKTUI_HOST_ROOT.
+DOCKER_CMD="$DOCKER_CMD -v /:/host:ro"
+DOCKER_CMD="$DOCKER_CMD -e DOCKTUI_HOST_ROOT=/host"
+DOCKER_CMD="$DOCKER_CMD -v $HOME:$HOME:ro"  # Same-path mount keeps home-directory projects working as-is
 # Do not set working directory - use the image's default /app directory
 
 # Create logs directory on host if it doesn't exist (for debug mode)

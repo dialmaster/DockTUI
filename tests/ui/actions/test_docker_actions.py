@@ -199,6 +199,95 @@ class TestDockerActions:
             "test-container", "recreating..."
         )
 
+    @staticmethod
+    def _synchronous_thread(target=None, args=(), kwargs=None, **_ignored):
+        """Thread factory that runs the target immediately on start()."""
+        thread = MagicMock()
+        thread.start = Mock(side_effect=lambda: target(*args, **(kwargs or {})))
+        return thread
+
+    def _completed_messages(self, app):
+        from DockTUI.ui.base.container_list_base import DockerOperationCompleted
+
+        return [
+            m for m in app._posted_messages if isinstance(m, DockerOperationCompleted)
+        ]
+
+    def test_container_command_failure_is_reported(self):
+        """A container operation that fails in the background reaches the UI."""
+        app = MockDockTUIApp()
+        app.container_list.selected_item = ("container", "test-container")
+        app.container_list.selected_container_data = {"name": "my-container"}
+
+        def fake_execute(container_id, command, on_complete=None):
+            on_complete(False, "port is already allocated")
+            return True, container_id
+
+        app.docker.execute_container_command.side_effect = fake_execute
+
+        with patch(
+            "DockTUI.ui.actions.docker_actions.threading.Thread",
+            side_effect=self._synchronous_thread,
+        ):
+            app.execute_docker_command("start")
+
+        messages = self._completed_messages(app)
+        assert len(messages) == 1
+        assert messages[0].success is False
+        assert messages[0].operation == "start"
+        assert messages[0].item_id == "test-container"
+        assert "port is already allocated" in messages[0].message
+
+    def test_container_command_success_clears_status_override(self):
+        """A completed container operation clears its transient status."""
+        app = MockDockTUIApp()
+        app.container_list.selected_item = ("container", "test-container")
+        app.container_list.selected_container_data = {"name": "my-container"}
+
+        def fake_execute(container_id, command, on_complete=None):
+            on_complete(True, "")
+            return True, container_id
+
+        app.docker.execute_container_command.side_effect = fake_execute
+
+        with patch(
+            "DockTUI.ui.actions.docker_actions.threading.Thread",
+            side_effect=self._synchronous_thread,
+        ):
+            app.execute_docker_command("stop")
+
+        app.container_list.clear_status_override.assert_called_once_with("test-container")
+        messages = self._completed_messages(app)
+        assert len(messages) == 1
+        assert messages[0].success is True
+
+    def test_stack_command_failure_is_reported(self):
+        """A stack operation that fails in the background reaches the UI."""
+        app = MockDockTUIApp()
+        app.container_list.selected_item = ("stack", "test-stack")
+        app.container_list.selected_stack_data = {
+            "name": "my-stack",
+            "config_file": "/path/to/compose.yml",
+        }
+
+        def fake_execute(stack_name, config_file, command, on_complete=None):
+            on_complete(False, "Error starting container db: bind: address in use")
+            return True
+
+        app.docker.execute_stack_command.side_effect = fake_execute
+
+        with patch(
+            "DockTUI.ui.actions.docker_actions.threading.Thread",
+            side_effect=self._synchronous_thread,
+        ):
+            app.execute_docker_command("start")
+
+        messages = self._completed_messages(app)
+        assert len(messages) == 1
+        assert messages[0].success is False
+        assert messages[0].operation == "start"
+        assert "bind: address in use" in messages[0].message
+
     @patch("threading.Thread")
     def test_execute_docker_command_stack_start(self, mock_thread):
         """Test execute_docker_command for stack start."""
@@ -776,23 +865,28 @@ class TestDockerActions:
         assert target_func is not None
         target_func()
 
-        # Verify docker command was called
-        app.docker.execute_container_command.assert_called_once_with(
-            "test-container", "start"
-        )
+        # Verify docker command was called with a completion callback
+        app.docker.execute_container_command.assert_called_once()
+        call_args, call_kwargs = app.docker.execute_container_command.call_args
+        assert call_args == ("test-container", "start")
+        on_complete = call_kwargs["on_complete"]
+        assert callable(on_complete)
 
-        # Verify timer was set to clear status (there are 2 timers: one from thread, one from line 176)
-        assert len(app._timers) == 2
-        # Find the timer with 3 second delay (from the thread)
-        timer_3s = [t for t in app._timers if t[0] == 3]
-        assert len(timer_3s) == 1
+        # Only the follow-up refresh timer is scheduled; status clearing now
+        # happens when the operation actually completes.
+        assert len(app._timers) == 1
+        assert app._timers[0][0] == 2
+        app.container_list.clear_status_override.assert_not_called()
 
-        # Execute the 3 second timer callback
-        timer_callback = timer_3s[0][1]
-        timer_callback()
+        # Simulate the worker reporting completion
+        on_complete(True, "Started container my-container")
 
-        # Verify status was cleared and refresh was called
         app.container_list.clear_status_override.assert_called_once_with(
             "test-container"
         )
-        app.action_refresh.assert_called_once()
+        completed = [
+            m for m in app._posted_messages if m.__class__.__name__ == "DockerOperationCompleted"
+        ]
+        assert len(completed) == 1
+        assert completed[0].success is True
+        assert completed[0].message == "Started container my-container"

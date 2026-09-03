@@ -391,23 +391,20 @@ class TestDockerManager:
         with patch.object(manager, "_check_compose_file_accessible") as mock_check:
             mock_check.return_value = True
 
-            with patch("DockTUI.docker_mgmt.manager.subprocess.run") as mock_run:
-                mock_run.return_value = Mock(returncode=0, stdout="Success", stderr="")
+            with patch("DockTUI.docker_mgmt.manager.subprocess.Popen") as mock_popen:
+                mock_process = Mock()
+                mock_process.communicate = Mock(return_value=("Success", ""))
+                mock_process.returncode = 0
+                mock_popen.return_value = mock_process
 
-                with patch("DockTUI.docker_mgmt.manager.threading.Thread") as mock_thread:
-                    def run_target(target=None, args=None, **kwargs):
-                        thread = Mock()
-                        thread.start = Mock()
-                        if target and args is None:
-                            target()
-                        return thread
-
-                    mock_thread.side_effect = run_target
-
+                with patch("DockTUI.docker_mgmt.manager.threading.Thread", side_effect=self._synchronous_thread):
                     success, container_id = manager.execute_container_command("container1", "recreate")
 
         assert success is True
         assert container_id == mock_container.short_id
+        cmd = mock_popen.call_args[0][0]
+        assert cmd[:4] == ["docker", "compose", "-p", "stack1"]
+        assert cmd[-4:] == ["up", "-d", "--force-recreate", "service1"]
 
     def test_execute_container_command_invalid(self, manager):
         """Test executing invalid command."""
@@ -422,6 +419,217 @@ class TestDockerManager:
         success, container_id = manager.execute_container_command("container1", "start")
         assert success is True
         assert container_id == "container1"
+
+    @staticmethod
+    def _synchronous_thread(target=None, args=(), kwargs=None, **_ignored):
+        """Thread factory that runs the target immediately on start()."""
+        thread = Mock()
+        thread.start = Mock(side_effect=lambda: target(*args, **(kwargs or {})))
+        return thread
+
+    def test_execute_container_command_reports_start_failure(self, manager, mock_docker_client):
+        """A failed start reports the daemon's error through on_complete and last_error."""
+        mock_container = Mock()
+        mock_container.start.side_effect = docker.errors.APIError(
+            "port is already allocated"
+        )
+        mock_docker_client.containers.get.return_value = mock_container
+        on_complete = Mock()
+
+        with patch("DockTUI.docker_mgmt.manager.threading.Thread", side_effect=self._synchronous_thread):
+            manager.execute_container_command("container1", "start", on_complete=on_complete)
+
+        on_complete.assert_called_once()
+        success, message = on_complete.call_args[0]
+        assert success is False
+        assert "port is already allocated" in message
+        assert "port is already allocated" in manager.last_error
+
+    def test_execute_container_command_reports_daemon_explanation(self, manager, mock_docker_client):
+        """API errors are reported with the daemon's explanation, not the request URL."""
+        response = Mock()
+        response.status_code = 400
+        response.reason = "Bad Request"
+        response.url = "http+docker://localhost/v1.49/containers/abc/start"
+        error = docker.errors.APIError(
+            "400 Client Error for http+docker://localhost/v1.49/containers/abc/start: Bad Request",
+            response=response,
+            explanation='failed to create task: exec: "/nope": no such file or directory',
+        )
+        mock_container = Mock()
+        mock_container.start.side_effect = error
+        mock_docker_client.containers.get.return_value = mock_container
+        on_complete = Mock()
+
+        with patch("DockTUI.docker_mgmt.manager.threading.Thread", side_effect=self._synchronous_thread):
+            manager.execute_container_command("container1", "start", on_complete=on_complete)
+
+        _, message = on_complete.call_args[0]
+        assert "no such file or directory" in message
+        assert "http+docker" not in message
+
+    def test_execute_container_command_reports_success(self, manager, mock_docker_client):
+        """A successful start calls on_complete with success=True."""
+        mock_docker_client.containers.get.return_value = Mock()
+        on_complete = Mock()
+
+        with patch("DockTUI.docker_mgmt.manager.threading.Thread", side_effect=self._synchronous_thread):
+            manager.execute_container_command("container1", "start", on_complete=on_complete)
+
+        on_complete.assert_called_once()
+        success, _ = on_complete.call_args[0]
+        assert success is True
+        assert manager.last_error is None
+
+    def test_execute_container_command_recreate_reports_failure(self, manager, mock_docker_client):
+        """A failed container recreate surfaces compose's stderr and clears the transition state."""
+        mock_container = Mock()
+        mock_container.short_id = "cont1"
+        mock_container.labels = {
+            "com.docker.compose.project": "stack1",
+            "com.docker.compose.service": "service1",
+            "com.docker.compose.project.config_files": "/path/to/compose.yml",
+        }
+        mock_docker_client.containers.get.return_value = mock_container
+        on_complete = Mock()
+
+        with patch.object(manager, "_check_compose_file_accessible", return_value=True):
+            with patch("DockTUI.docker_mgmt.manager.subprocess.Popen") as mock_popen:
+                mock_process = Mock()
+                mock_process.communicate = Mock(return_value=("", "no such image: foo"))
+                mock_process.returncode = 1
+                mock_popen.return_value = mock_process
+                with patch("DockTUI.docker_mgmt.manager.threading.Thread", side_effect=self._synchronous_thread):
+                    success, _ = manager.execute_container_command(
+                        "container1", "recreate", on_complete=on_complete
+                    )
+
+        assert success is True  # dispatched; the outcome arrives via on_complete
+        mock_process.communicate.assert_called_once()
+        on_complete.assert_called_once()
+        completed, message = on_complete.call_args[0]
+        assert completed is False
+        assert "no such image: foo" in message
+        assert "cont1" not in manager._transition_states
+
+    def test_execute_stack_command_down_reports_failure(self, manager):
+        """A failed compose down reads stderr and reports it through on_complete."""
+        on_complete = Mock()
+        with patch("DockTUI.docker_mgmt.manager.subprocess.Popen") as mock_popen:
+            mock_process = Mock()
+            mock_process.communicate = Mock(return_value=("", "network in use"))
+            mock_process.returncode = 1
+            mock_popen.return_value = mock_process
+            with patch("DockTUI.docker_mgmt.manager.threading.Thread", side_effect=self._synchronous_thread):
+                result = manager.execute_stack_command(
+                    "stack1", "/path/to/compose.yml", "down", on_complete=on_complete
+                )
+
+        assert result is True
+        mock_process.communicate.assert_called_once()
+        on_complete.assert_called_once()
+        success, message = on_complete.call_args[0]
+        assert success is False
+        assert "network in use" in message
+
+    def test_execute_stack_command_start_reports_partial_failure(self, manager):
+        """Stack start reports which container failed and why."""
+        ok_container = Mock()
+        ok_container.name = "web"
+        bad_container = Mock()
+        bad_container.name = "db"
+        bad_container.start.side_effect = docker.errors.APIError("bind: address in use")
+        on_complete = Mock()
+
+        with patch.object(manager, "get_compose_stacks") as mock_get_stacks:
+            mock_get_stacks.return_value = {
+                "stack1": {"containers": [ok_container, bad_container]}
+            }
+            with patch("DockTUI.docker_mgmt.manager.threading.Thread", side_effect=self._synchronous_thread):
+                manager.execute_stack_command(
+                    "stack1", "/path/to/compose.yml", "start", on_complete=on_complete
+                )
+
+        on_complete.assert_called_once()
+        success, message = on_complete.call_args[0]
+        assert success is False
+        assert "db" in message
+        assert "bind: address in use" in message
+
+    @staticmethod
+    def _compose_container(project: str, service: str, working_dir: str) -> Mock:
+        container = Mock()
+        container.name = f"{project}-{service}-1"
+        container.short_id = "abc123def456"
+        container.status = "running"
+        container.attrs = {}
+        container.labels = {
+            "com.docker.compose.project": project,
+            "com.docker.compose.service": service,
+            "com.docker.compose.project.config_files": f"{working_dir}/docker-compose.yml",
+            "com.docker.compose.project.working_dir": working_dir,
+        }
+        return container
+
+    def test_get_compose_stacks_records_working_dir(self, manager, mock_docker_client):
+        """The compose working directory label is kept alongside the config files."""
+        mock_docker_client.containers.list.return_value = [
+            self._compose_container("stack1", "web", "/opt/app")
+        ]
+
+        with patch.object(manager, "_check_compose_file_accessible", return_value=True):
+            stacks = manager.get_compose_stacks()
+
+        assert stacks["stack1"]["working_dir"] == "/opt/app"
+
+    def test_stack_down_uses_the_compose_project_directory(self, manager, mock_docker_client):
+        """Down runs compose against the stack's real project directory."""
+        mock_docker_client.containers.list.return_value = [
+            self._compose_container("stack1", "web", "/opt/app")
+        ]
+        with patch.object(manager, "_check_compose_file_accessible", return_value=True):
+            manager.get_compose_stacks()  # populates the working directory cache
+
+        with patch("DockTUI.docker_mgmt.manager.subprocess.Popen") as mock_popen:
+            mock_process = Mock()
+            mock_process.communicate = Mock(return_value=("", ""))
+            mock_process.returncode = 0
+            mock_popen.return_value = mock_process
+            manager.execute_stack_command("stack1", "/opt/app/docker-compose.yml", "down")
+
+        cmd = mock_popen.call_args[0][0]
+        assert cmd[cmd.index("--project-directory") + 1] == "/opt/app"
+        assert cmd[-1] == "down"
+
+    def test_container_recreate_uses_the_working_dir_label(self, manager, mock_docker_client):
+        """Container recreate passes the compose project directory from the labels."""
+        container = self._compose_container("stack1", "web", "/opt/app")
+        mock_docker_client.containers.get.return_value = container
+
+        with patch.object(manager, "_check_compose_file_accessible", return_value=True):
+            with patch("DockTUI.docker_mgmt.manager.subprocess.Popen") as mock_popen:
+                mock_process = Mock()
+                mock_process.communicate = Mock(return_value=("", ""))
+                mock_process.returncode = 0
+                mock_popen.return_value = mock_process
+                with patch("DockTUI.docker_mgmt.manager.threading.Thread", side_effect=self._synchronous_thread):
+                    manager.execute_container_command("abc123def456", "recreate")
+
+        cmd = mock_popen.call_args[0][0]
+        assert cmd[cmd.index("--project-directory") + 1] == "/opt/app"
+        assert cmd[-4:] == ["up", "-d", "--force-recreate", "web"]
+
+    def test_compose_command_without_docker_cli_gives_clear_message(self, manager):
+        """A missing docker binary produces an actionable error, not an OS error."""
+        with patch(
+            "DockTUI.docker_mgmt.manager.subprocess.Popen",
+            side_effect=FileNotFoundError(2, "No such file or directory", "docker"),
+        ):
+            result = manager.execute_stack_command("stack1", "/path/to/compose.yml", "down")
+
+        assert result is False
+        assert "Docker CLI" in manager.last_error
+        assert "compose" in manager.last_error.lower()
 
     def test_get_networks(self, manager, mock_docker_client):
         """Test getting Docker networks."""
@@ -438,6 +646,7 @@ class TestDockerManager:
         }
 
         mock_docker_client.networks.list.return_value = [mock_network]
+        mock_docker_client.containers.list.return_value = []
 
         networks = manager.get_networks()
 
@@ -446,6 +655,37 @@ class TestDockerManager:
         assert networks["test_network"]["driver"] == "bridge"
         assert networks["test_network"]["total_containers"] == 1
         assert len(networks["test_network"]["connected_containers"]) == 1
+
+    def test_get_networks_reuses_a_single_container_listing(self, manager, mock_docker_client):
+        """Connected containers are resolved from one containers.list() call, not a get() each."""
+        mock_network = Mock()
+        mock_network.id = "network1"
+        mock_network.short_id = "network1"
+        mock_network.name = "net"
+        mock_network.attrs = {
+            "Driver": "bridge",
+            "Scope": "local",
+            "IPAM": {"Config": []},
+            "Containers": {
+                "c1full": {"Name": "web", "IPv4Address": "172.17.0.2/16"},
+                "c2full": {"Name": "db", "IPv4Address": "172.17.0.3/16"},
+            },
+        }
+        mock_docker_client.networks.list.return_value = [mock_network]
+        web = Mock()
+        web.id = "c1full"
+        web.labels = {"com.docker.compose.project": "stack1"}
+        db = Mock()
+        db.id = "c2full"
+        db.labels = {}
+        mock_docker_client.containers.list.return_value = [web, db]
+
+        networks = manager.get_networks()
+
+        mock_docker_client.containers.get.assert_not_called()
+        mock_docker_client.containers.list.assert_called_once()
+        stacks = {c["name"]: c["stack"] for c in networks["net"]["connected_containers"]}
+        assert stacks == {"web": "stack1", "db": "ungrouped"}
 
     def test_get_networks_error(self, manager, mock_docker_client):
         """Test get_networks with error."""

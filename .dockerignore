@@ -26,8 +26,9 @@ logs/
 # Tests (not needed at runtime)
 tests/
 
-# Documentation
+# Documentation (README.md is referenced by pyproject and needed by Poetry)
 *.md
+!README.md
 
 # Development files
 Makefile

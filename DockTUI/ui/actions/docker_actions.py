@@ -147,21 +147,32 @@ class DockerActions:
                             stack_name, container_data
                         )
 
-                # Execute command in background thread
-                def execute_and_clear():
-                    success, _ = self.docker.execute_container_command(item_id, command)
-                    if success:
-                        # Clear status override after a delay
+                # Execute command in background thread; the outcome (including
+                # the daemon's error text) comes back through on_complete.
+                def execute_and_report():
+                    def on_complete(success: bool, result_message: str) -> None:
                         self.call_from_thread(
-                            self.set_timer,
-                            3,
-                            lambda: (
-                                self.container_list.clear_status_override(item_id),
-                                self.action_refresh(),
-                            ),
+                            self._finish_container_operation,
+                            command,
+                            item_id,
+                            success,
+                            result_message,
                         )
 
-                thread = threading.Thread(target=execute_and_clear)
+                    dispatched, _ = self.docker.execute_container_command(
+                        item_id, command, on_complete=on_complete
+                    )
+                    if not dispatched:
+                        self.call_from_thread(
+                            self._finish_container_operation,
+                            command,
+                            item_id,
+                            False,
+                            self.docker.last_error
+                            or f"Could not {command} container {item_name}",
+                        )
+
+                thread = threading.Thread(target=execute_and_report)
                 thread.daemon = True
                 thread.start()
 
@@ -186,20 +197,32 @@ class DockerActions:
                     # Force a UI refresh to show the updated container statuses
                     self.refresh()
 
-                    # Execute command in background thread
-                    def execute_and_clear():
-                        success = self.docker.execute_stack_command(
-                            stack_name, config_file, command
-                        )
-                        # Container statuses will auto-clear when they're no longer relevant
-                        # (handled in stack_manager.py based on actual container state)
-                        if not success:
+                    # Execute command in background thread; the outcome comes
+                    # back through on_complete.
+                    def execute_and_report():
+                        def on_complete(success: bool, result_message: str) -> None:
                             self.call_from_thread(
-                                self.error_display.update,
-                                f"Error {command}ing stack: {self.docker.last_error}",
+                                self._finish_stack_operation,
+                                base_command,
+                                stack_name,
+                                success,
+                                result_message,
                             )
 
-                    thread = threading.Thread(target=execute_and_clear)
+                        dispatched = self.docker.execute_stack_command(
+                            stack_name, config_file, command, on_complete=on_complete
+                        )
+                        if not dispatched:
+                            self.call_from_thread(
+                                self._finish_stack_operation,
+                                base_command,
+                                stack_name,
+                                False,
+                                self.docker.last_error
+                                or f"Could not {base_command} stack {stack_name}",
+                            )
+
+                    thread = threading.Thread(target=execute_and_report)
                     thread.daemon = True
                     thread.start()
 
@@ -217,11 +240,36 @@ class DockerActions:
                 self.set_timer(2, self.action_refresh)
             else:
                 self.error_display.update(
-                    f"Error {command}ing {item_type}: {self.docker.last_error}"
+                    f"Error running {command} on {item_type}: {self.docker.last_error}"
                 )
         except Exception as e:
             logger.error(f"Error executing {command} command: {str(e)}", exc_info=True)
             self.error_display.update(f"Error executing {command}: {str(e)}")
+
+    def _finish_container_operation(
+        self: "DockTUIApp", command: str, item_id: str, success: bool, message: str
+    ) -> None:
+        """Clear transient state for a finished container operation and report it."""
+        self.container_list.clear_status_override(item_id)
+        self.post_message(
+            DockerOperationCompleted(
+                operation=command, success=success, message=message, item_id=item_id
+            )
+        )
+
+    def _finish_stack_operation(
+        self: "DockTUIApp", command: str, stack_name: str, success: bool, message: str
+    ) -> None:
+        """Clear transient state for a finished stack operation and report it."""
+        if not success:
+            # Successful operations clear naturally as container states change;
+            # a failure would otherwise leave "starting..." style labels behind.
+            self.container_list.clear_stack_containers_status(stack_name)
+        self.post_message(
+            DockerOperationCompleted(
+                operation=command, success=success, message=message, item_id=stack_name
+            )
+        )
 
     def handle_post_recreate(
         self: "DockTUIApp", containers: list

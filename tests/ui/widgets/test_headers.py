@@ -31,7 +31,8 @@ class TestSectionHeader:
 
             assert header.base_title == "Test Section"
             assert not header.collapsed
-            assert header.can_focus is False
+            # Section headers must be reachable by keyboard
+            assert header.can_focus is True
             # Check that update was called during init
             header.update.assert_called()
 

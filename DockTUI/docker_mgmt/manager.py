@@ -3,15 +3,67 @@ import subprocess
 import threading
 import time
 from collections import defaultdict
-from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import docker
 
 from ..utils.formatting import format_bytes
 from ..utils.time_utils import format_uptime
+from .compose_paths import ComposePathResolver
 
 logger = logging.getLogger("DockTUI.docker_mgmt")
+
+# Container labels written by Docker Compose
+COMPOSE_PROJECT_LABEL = "com.docker.compose.project"
+COMPOSE_SERVICE_LABEL = "com.docker.compose.service"
+COMPOSE_CONFIG_FILES_LABEL = "com.docker.compose.project.config_files"
+COMPOSE_WORKING_DIR_LABEL = "com.docker.compose.project.working_dir"
+
+# Callback invoked from a background thread when an operation finishes.
+# Receives (success: bool, message: str).
+CompletionCallback = Optional[Callable[[bool, str], None]]
+
+DOCKER_CLI_MISSING_MESSAGE = (
+    "The Docker CLI with the compose plugin was not found. Recreate and Down "
+    "run 'docker compose'; install the Docker CLI or run DockTUI from the "
+    "official image."
+)
+
+# Past-tense descriptions used in completion messages
+COMMAND_PAST_TENSE = {
+    "start": "Started",
+    "stop": "Stopped",
+    "restart": "Restarted",
+    "remove": "Removed",
+    "recreate": "Recreated",
+    "down": "Took down",
+}
+
+
+class DockerCliNotFoundError(RuntimeError):
+    """Raised when the docker binary needed for compose commands is missing."""
+
+
+def _describe_error(error: Exception) -> str:
+    """Return the daemon's explanation for API errors, else the error text.
+
+    docker-py's APIError string starts with the request URL, which is noise for
+    a user; the explanation carries the reason the daemon gave.
+    """
+    explanation = getattr(error, "explanation", None)
+    if explanation:
+        return str(explanation)
+    return str(error)
+
+
+def _notify(on_complete: CompletionCallback, success: bool, message: str) -> None:
+    """Invoke a completion callback, shielding the caller from callback errors."""
+    if on_complete is None:
+        return
+    try:
+        on_complete(success, message)
+    except Exception as e:
+        logger.error(f"Error in completion callback: {str(e)}", exc_info=True)
 
 
 class DockerManager:
@@ -31,6 +83,10 @@ class DockerManager:
             self._volume_usage = defaultdict(
                 set
             )  # volume_name -> set of container names
+            # Compose file path resolution (handles the in-container host mount)
+            self._paths = ComposePathResolver()
+            # stack name -> compose working directory, refreshed by get_compose_stacks
+            self._stack_working_dirs: Dict[str, str] = {}
         except Exception as e:
             logger.error(f"Failed to initialize Docker client: {str(e)}", exc_info=True)
             raise
@@ -44,22 +100,8 @@ class DockerManager:
         Returns:
             bool: True if at least one compose file is accessible, False otherwise
         """
-        if not config_file_path or config_file_path == "N/A":
-            return False
-
         try:
-            # Config files can be comma-separated
-            config_files = [f.strip() for f in config_file_path.split(",")]
-
-            # Check if at least one file is accessible
-            for config_file in config_files:
-                if Path(config_file).is_file():
-                    logger.debug(f"Compose file accessible: {config_file}")
-                    return True
-
-            logger.debug(f"No accessible compose files found in: {config_file_path}")
-            return False
-
+            return self._paths.is_accessible(config_file_path)
         except Exception as e:
             logger.error(
                 f"Error checking compose file accessibility: {str(e)}", exc_info=True
@@ -84,6 +126,7 @@ class DockerManager:
             lambda: {
                 "name": "",
                 "config_file": "",
+                "working_dir": "",
                 "containers": [],
                 "running": 0,
                 "exited": 0,
@@ -104,20 +147,22 @@ class DockerManager:
 
             for container in containers:
                 try:
-                    project = container.labels.get(
-                        "com.docker.compose.project", "ungrouped"
-                    )
+                    project = container.labels.get(COMPOSE_PROJECT_LABEL, "ungrouped")
                     config_file = container.labels.get(
-                        "com.docker.compose.project.config_files", "N/A"
+                        COMPOSE_CONFIG_FILES_LABEL, "N/A"
                     )
+                    working_dir = container.labels.get(COMPOSE_WORKING_DIR_LABEL, "")
 
                     if project not in stacks:
                         stacks[project]["name"] = project
                         stacks[project]["config_file"] = config_file
+                        stacks[project]["working_dir"] = working_dir
                         stacks[project]["has_compose_file"] = config_file != "N/A"
                         stacks[project]["can_recreate"] = (
                             self._check_compose_file_accessible(config_file)
                         )
+                        if working_dir:
+                            self._stack_working_dirs[project] = working_dir
 
                     stacks[project]["containers"].append(container)
                     stacks[project]["total"] += 1
@@ -412,130 +457,173 @@ class DockerManager:
             )
             return ""
 
+    def _spawn_compose(
+        self, cmd: List[str], on_finished: Callable[[bool, str], None]
+    ) -> None:
+        """Run a docker compose command in the background.
+
+        The process output is drained on a monitor thread (so the child can
+        never block on a full pipe) and on_finished(success, output) is called
+        from that thread once the command exits.
+
+        Raises:
+            DockerCliNotFoundError: if the docker binary is not installed
+        """
+        logger.info(f"Executing compose command: {' '.join(cmd)}")
+        try:
+            process = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+            )
+        except FileNotFoundError:
+            raise DockerCliNotFoundError(DOCKER_CLI_MISSING_MESSAGE)
+
+        def monitor():
+            stdout, stderr = process.communicate()
+            success = process.returncode == 0
+            output = (stderr or stdout or "").strip()
+            if success:
+                logger.info(f"Compose command succeeded: {' '.join(cmd)}")
+            else:
+                logger.error(f"Compose command failed: {' '.join(cmd)}: {output}")
+            on_finished(success, output)
+
+        thread = threading.Thread(target=monitor)
+        thread.daemon = True
+        thread.start()
+
+    def _recreate_container(
+        self, container_id: str, on_complete: CompletionCallback
+    ) -> Tuple[bool, str]:
+        """Recreate a single compose service via 'docker compose up'."""
+        container = self.client.containers.get(container_id)
+        container_short_id = container.short_id
+        container_name = container.name
+        stack_name = container.labels.get(COMPOSE_PROJECT_LABEL)
+        service_name = container.labels.get(COMPOSE_SERVICE_LABEL)
+
+        if not stack_name or not service_name:
+            self.last_error = (
+                "Cannot recreate container: missing compose project or service labels"
+            )
+            logger.error(self.last_error)
+            return False, ""
+
+        config_files = container.labels.get(COMPOSE_CONFIG_FILES_LABEL, "")
+        if not self._check_compose_file_accessible(config_files):
+            self.last_error = "Cannot recreate container: compose file not accessible"
+            logger.error(self.last_error)
+            return False, ""
+
+        cmd = self._paths.build_compose_command(
+            stack_name,
+            config_files,
+            working_dir=container.labels.get(COMPOSE_WORKING_DIR_LABEL) or None,
+        )
+        cmd.extend(["up", "-d", "--force-recreate", service_name])
+
+        with self._transition_lock:
+            self._transition_states[container_short_id] = "recreating..."
+
+        def on_finished(success: bool, output: str) -> None:
+            with self._transition_lock:
+                self._transition_states.pop(container_short_id, None)
+            if success:
+                message = f"Recreated container {container_name}"
+            else:
+                message = f"Failed to recreate container {container_name}: {output}"
+                self.last_error = message
+            _notify(on_complete, success, message)
+
+        self.last_error = None
+        try:
+            self._spawn_compose(cmd, on_finished)
+        except DockerCliNotFoundError as e:
+            with self._transition_lock:
+                self._transition_states.pop(container_short_id, None)
+            self.last_error = str(e)
+            logger.error(self.last_error)
+            return False, ""
+
+        return True, container_short_id
+
     def execute_container_command(
-        self, container_id: str, command: str
+        self, container_id: str, command: str, on_complete: CompletionCallback = None
     ) -> Tuple[bool, str]:
         """Execute a command on a specific container.
+
+        The operation runs in a background thread. Its outcome is reported
+        through on_complete(success, message), which is invoked from that
+        thread; last_error is also set when the operation fails.
 
         Args:
             container_id: ID of the container to operate on
             command: Command to execute (start, stop, restart, recreate, remove)
+            on_complete: Optional callback receiving (success, message)
 
         Returns:
-            Tuple[bool, str]: (success, container_short_id) - True if successful, False otherwise
+            Tuple[bool, str]: (dispatched, container_short_id). dispatched is
+            False when the operation could not be started at all.
         """
         try:
             if command == "recreate":
-                # For recreate, we need to get the service name and stack name
-                container = self.client.containers.get(container_id)
-                container_short_id = container.short_id
-                stack_name = container.labels.get("com.docker.compose.project")
-                service_name = container.labels.get("com.docker.compose.service")
+                return self._recreate_container(container_id, on_complete)
 
-                if not stack_name or not service_name:
-                    error_msg = "Cannot recreate container: missing compose project or service labels"
-                    logger.error(error_msg)
-                    self.last_error = error_msg
-                    return False, ""
+            logger.info(
+                f"Executing container command: {command} on container {container_id}"
+            )
 
-                # Get the compose config file(s)
-                config_files = container.labels.get(
-                    "com.docker.compose.project.config_files", ""
-                )
+            transition_labels = {
+                "start": "starting...",
+                "stop": "stopping...",
+                "restart": "restarting...",
+                "remove": "removing...",
+            }
+            with self._transition_lock:
+                if command in transition_labels:
+                    self._transition_states[container_id] = transition_labels[command]
 
-                # Check if compose file is accessible
-                if not self._check_compose_file_accessible(config_files):
-                    error_msg = (
-                        f"Cannot recreate container: compose file not accessible"
-                    )
-                    logger.error(error_msg)
-                    self.last_error = error_msg
-                    return False, ""
+            def run_container_command():
+                try:
+                    # Get container inside the thread to avoid blocking
+                    container = self.client.containers.get(container_id)
+                    container_name = getattr(container, "name", container_id)
 
-                cmd = ["docker", "compose", "-p", stack_name]
-
-                # Add config file(s) if available
-                if config_files and config_files != "N/A":
-                    # Config files are comma-separated
-                    for config_file in config_files.split(","):
-                        cmd.extend(["-f", config_file.strip()])
-
-                cmd.extend(["up", "-d", "--force-recreate", service_name])
-                logger.info(f"Executing recreate command: {' '.join(cmd)}")
-
-                # Set transition state for recreate
-                with self._transition_lock:
-                    self._transition_states[container_short_id] = "recreating..."
-
-                # Use Popen to run the command in the background
-                process = subprocess.Popen(
-                    cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-                )
-
-                # Start a thread to monitor completion and clear transition state
-                def monitor_recreate():
-                    process.wait()  # Wait for process to complete
-                    with self._transition_lock:
-                        self._transition_states.pop(container_short_id, None)
-
-                thread = threading.Thread(target=monitor_recreate)
-                thread.daemon = True
-                thread.start()
-
-                # Clear any previous error if the operation succeeded
-                self.last_error = None
-                # We don't wait for the process to complete to keep the UI responsive
-                return True, container_short_id
-            else:
-                logger.info(
-                    f"Executing container command: {command} on container {container_id}"
-                )
-
-                # Set transition state
-                with self._transition_lock:
                     if command == "start":
-                        self._transition_states[container_id] = "starting..."
+                        container.start()
                     elif command == "stop":
-                        self._transition_states[container_id] = "stopping..."
+                        container.stop()
                     elif command == "restart":
-                        self._transition_states[container_id] = "restarting..."
+                        container.restart()
                     elif command == "remove":
-                        self._transition_states[container_id] = "removing..."
+                        container.remove(force=True)
+                    else:
+                        raise ValueError(f"Unknown container command: {command}")
 
-                def run_container_command():
-                    try:
-                        # Get container inside the thread to avoid blocking
-                        container = self.client.containers.get(container_id)
+                    past_tense = COMMAND_PAST_TENSE.get(command, command.capitalize())
+                    _notify(
+                        on_complete, True, f"{past_tense} container {container_name}"
+                    )
+                except Exception as e:
+                    message = (
+                        f"Failed to {command} container {container_id}: "
+                        f"{_describe_error(e)}"
+                    )
+                    logger.error(message, exc_info=True)
+                    self.last_error = message
+                    _notify(on_complete, False, message)
+                finally:
+                    # Clear the transition state when done
+                    with self._transition_lock:
+                        self._transition_states.pop(container_id, None)
 
-                        if command == "start":
-                            container.start()
-                        elif command == "stop":
-                            container.stop()
-                        elif command == "restart":
-                            container.restart()
-                        elif command == "remove":
-                            container.remove(force=True)
-                        else:
-                            error_msg = f"Unknown container command: {command}"
-                            logger.error(error_msg)
-                            self.last_error = error_msg
-                    except Exception as e:
-                        logger.error(
-                            f"Error in container command thread: {str(e)}",
-                            exc_info=True,
-                        )
-                    finally:
-                        # Clear the transition state when done
-                        with self._transition_lock:
-                            self._transition_states.pop(container_id, None)
-
-                # Run the command in a separate thread to avoid blocking
-                thread = threading.Thread(target=run_container_command)
-                thread.daemon = True
-                thread.start()
-
-            # Clear any previous error if the operation succeeded
+            # Clear any previous error before the worker can report a new one
             self.last_error = None
+
+            # Run the command in a separate thread to avoid blocking
+            thread = threading.Thread(target=run_container_command)
+            thread.daemon = True
+            thread.start()
+
             return True, container_id
         except Exception as e:
             error_msg = f"Error executing container command: {str(e)}"
@@ -561,6 +649,13 @@ class DockerManager:
         try:
             docker_networks = self.client.networks.list()
 
+            # One listing serves every network; fetching each connected
+            # container individually costs an API call per container per tick.
+            containers_by_id = {
+                container.id: container
+                for container in self.client.containers.list(all=True)
+            }
+
             for network in docker_networks:
                 try:
                     # Reload the network to get detailed information including containers
@@ -581,16 +676,19 @@ class DockerManager:
 
                     for container_id, container_info in containers.items():
                         try:
-                            # Get the actual container object to access labels
-                            container_obj = self.client.containers.get(container_id)
+                            container_obj = containers_by_id.get(container_id)
                             container_name = container_info.get(
-                                "Name", container_obj.name
+                                "Name",
+                                (
+                                    container_obj.name
+                                    if container_obj
+                                    else container_id[:12]
+                                ),
                             )
 
                             # Determine stack from container labels
-                            stack_name = container_obj.labels.get(
-                                "com.docker.compose.project", "ungrouped"
-                            )
+                            labels = container_obj.labels if container_obj else {}
+                            stack_name = labels.get(COMPOSE_PROJECT_LABEL, "ungrouped")
                             connected_stacks.add(stack_name)
 
                             container_data = {
@@ -931,18 +1029,94 @@ class DockerManager:
             self.last_error = msg
             return False, msg, 0
 
+    def _run_on_stack_containers(
+        self,
+        stack_name: str,
+        containers: List,
+        command: str,
+        on_complete: CompletionCallback,
+    ) -> None:
+        """Start/stop/restart every container of a stack concurrently.
+
+        Runs on a background thread and reports the aggregate outcome through
+        on_complete once every container has been processed.
+        """
+
+        def run_stack_command():
+            errors: List[str] = []
+            errors_lock = threading.Lock()
+
+            def execute_on_container(container):
+                try:
+                    if command == "start":
+                        container.start()
+                    elif command == "stop":
+                        container.stop()
+                    elif command == "restart":
+                        container.restart()
+                    logger.debug(f"Successfully ran {command} on {container.name}")
+                except Exception as e:
+                    message = f"{container.name}: {_describe_error(e)}"
+                    logger.error(f"Error running {command} on {message}")
+                    with errors_lock:
+                        errors.append(message)
+
+            threads = []
+            for container in containers:
+                thread = threading.Thread(
+                    target=execute_on_container, args=(container,)
+                )
+                thread.daemon = True
+                threads.append(thread)
+                thread.start()
+
+            for thread in threads:
+                thread.join(timeout=10.0)
+
+            if errors:
+                message = f"Failed to {command} stack {stack_name}: " + "; ".join(
+                    errors
+                )
+                self.last_error = message
+                _notify(on_complete, False, message)
+            else:
+                past_tense = COMMAND_PAST_TENSE.get(command, command.capitalize())
+                _notify(on_complete, True, f"{past_tense} stack {stack_name}")
+
+        thread = threading.Thread(target=run_stack_command)
+        thread.daemon = True
+        thread.start()
+
+    def _build_compose_command(self, stack_name: str, config_file: str) -> List[str]:
+        """Build the 'docker compose -p <stack> -f <file>...' prefix for a stack."""
+        return self._paths.build_compose_command(
+            stack_name,
+            config_file,
+            working_dir=self._stack_working_dirs.get(stack_name),
+        )
+
     def execute_stack_command(
-        self, stack_name: str, config_file: str, command: str
+        self,
+        stack_name: str,
+        config_file: str,
+        command: str,
+        on_complete: CompletionCallback = None,
     ) -> bool:
         """Execute a command on a Docker Compose stack.
+
+        The operation runs in the background. Its outcome is reported through
+        on_complete(success, message), invoked from a worker thread; last_error
+        is also set when the operation fails.
 
         Args:
             stack_name: Name of the stack to operate on
             config_file: Path to the compose configuration file
-            command: Command to execute (start, stop, restart, recreate)
+            command: Command to execute (start, stop, restart, recreate, down,
+                down:remove_volumes)
+            on_complete: Optional callback receiving (success, message)
 
         Returns:
-            bool: True if successful, False otherwise
+            bool: True if the operation was dispatched, False if it could not start
         """
         try:
             # For start/stop/restart, use SDK to operate on all containers in the stack
@@ -950,157 +1124,56 @@ class DockerManager:
                 logger.info(
                     f"Executing {command} on all containers in stack: {stack_name}"
                 )
-
-                # Get all containers for this stack
-                stacks = self.get_compose_stacks()
-                stack_info = stacks.get(stack_name)
-
+                stack_info = self.get_compose_stacks().get(stack_name)
                 if not stack_info:
-                    error_msg = f"Stack '{stack_name}' not found"
-                    logger.error(error_msg)
-                    self.last_error = error_msg
+                    self.last_error = f"Stack '{stack_name}' not found"
+                    logger.error(self.last_error)
                     return False
 
-                # Use threading to execute commands on all containers concurrently
-                def run_stack_command():
-                    try:
-                        threads = []
-                        errors = []
-
-                        def execute_on_container(container):
-                            try:
-                                if command == "start":
-                                    container.start()
-                                elif command == "stop":
-                                    container.stop()
-                                elif command == "restart":
-                                    container.restart()
-                                logger.debug(
-                                    f"Successfully {command}ed container {container.name}"
-                                )
-                            except Exception as e:
-                                error_msg = f"Error {command}ing container {container.name}: {str(e)}"
-                                logger.error(error_msg)
-                                errors.append(error_msg)
-
-                        # Create threads for each container
-                        for container in stack_info["containers"]:
-                            thread = threading.Thread(
-                                target=execute_on_container, args=(container,)
-                            )
-                            thread.daemon = True
-                            threads.append(thread)
-                            thread.start()
-
-                        # Wait for all threads to complete
-                        for thread in threads:
-                            thread.join(timeout=10.0)
-
-                        if errors:
-                            self.last_error = "; ".join(errors)
-                            logger.error(
-                                f"Errors during stack {command}: {self.last_error}"
-                            )
-
-                    except Exception as e:
-                        logger.error(
-                            f"Error in stack command thread: {str(e)}", exc_info=True
-                        )
-
-                # Run the command in a separate thread to avoid blocking
-                thread = threading.Thread(target=run_stack_command)
-                thread.daemon = True
-                thread.start()
-
-                # Clear any previous error if the operation succeeded
                 self.last_error = None
-                return True
-
-            # For recreate, use subprocess but only if compose file is accessible
-            elif command == "recreate":
-                # Check if we can recreate this stack
-                if not self._check_compose_file_accessible(config_file):
-                    error_msg = f"Cannot recreate stack '{stack_name}': compose file not accessible"
-                    logger.error(error_msg)
-                    self.last_error = error_msg
-                    return False
-
-                cmd = ["docker", "compose", "-p", stack_name]
-
-                # Add config file(s) if provided and not 'N/A'
-                if config_file and config_file != "N/A":
-                    # Config files are comma-separated
-                    for cf in config_file.split(","):
-                        cmd.extend(["-f", cf.strip()])
-
-                cmd.extend(["up", "-d"])
-                logger.info(f"Executing stack recreate command: {' '.join(cmd)}")
-
-                # Use Popen to run the command in the background
-                process = subprocess.Popen(
-                    cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+                self._run_on_stack_containers(
+                    stack_name, stack_info["containers"], command, on_complete
                 )
-
-                # Start a thread to monitor the process output
-                def monitor_recreate():
-                    stdout, stderr = process.communicate()
-                    if process.returncode != 0:
-                        error_msg = f"Stack recreate failed: {stderr}"
-                        logger.error(error_msg)
-                        self.last_error = error_msg
-                    else:
-                        logger.info(f"Stack recreate completed successfully: {stdout}")
-
-                thread = threading.Thread(target=monitor_recreate)
-                thread.daemon = True
-                thread.start()
-
-                # Clear any previous error if the operation succeeded
-                self.last_error = None
-                # We don't wait for the process to complete to keep the UI responsive
                 return True
 
-            # For down command, use docker compose down
+            if command == "recreate":
+                if not self._check_compose_file_accessible(config_file):
+                    self.last_error = f"Cannot recreate stack '{stack_name}': compose file not accessible"
+                    logger.error(self.last_error)
+                    return False
+                cmd = self._build_compose_command(stack_name, config_file)
+                cmd.extend(["up", "-d"])
+                base_command = "recreate"
             elif command.startswith("down"):
-                # Extract remove_volumes flag if passed as part of command
-                remove_volumes = False
-                if ":" in command:
-                    base_command, flags = command.split(":", 1)
-                    remove_volumes = "remove_volumes" in flags
-                    logger.info(
-                        f"Down command with flags: remove_volumes={remove_volumes}"
-                    )
-
-                cmd = ["docker", "compose", "-p", stack_name]
-
-                # Add config file(s) if provided and not 'N/A'
-                if config_file and config_file != "N/A":
-                    # Config files are comma-separated
-                    for cf in config_file.split(","):
-                        cmd.extend(["-f", cf.strip()])
-
+                remove_volumes = ":" in command and "remove_volumes" in command
+                cmd = self._build_compose_command(stack_name, config_file)
                 cmd.append("down")
-
-                # Add volumes flag if requested
                 if remove_volumes:
                     cmd.append("--volumes")
-
-                logger.info(f"Executing stack down command: {' '.join(cmd)}")
-
-                # Use Popen to run the command in the background
-                process = subprocess.Popen(
-                    cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-                )
-
-                # Clear any previous error if the operation succeeded
-                self.last_error = None
-                # We don't wait for the process to complete to keep the UI responsive
-                return True
+                base_command = "down"
             else:
-                error_msg = f"Unknown stack command: {command}"
-                logger.error(error_msg)
-                self.last_error = error_msg
+                self.last_error = f"Unknown stack command: {command}"
+                logger.error(self.last_error)
                 return False
+
+            def on_finished(success: bool, output: str) -> None:
+                if success:
+                    past_tense = COMMAND_PAST_TENSE[base_command]
+                    message = f"{past_tense} stack {stack_name}"
+                else:
+                    message = f"Failed to {base_command} stack {stack_name}: {output}"
+                    self.last_error = message
+                _notify(on_complete, success, message)
+
+            self.last_error = None
+            try:
+                self._spawn_compose(cmd, on_finished)
+            except DockerCliNotFoundError as e:
+                self.last_error = str(e)
+                logger.error(self.last_error)
+                return False
+
+            return True
 
         except Exception as e:
             error_msg = f"Error executing stack command: {str(e)}"

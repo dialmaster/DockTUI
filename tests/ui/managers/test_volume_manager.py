@@ -61,7 +61,7 @@ class TestVolumeManager:
         assert self.manager.selected_volume_data == volume_data
         assert self.parent.selected_volume_data == volume_data
 
-    @patch("DockTUI.ui.managers.volume_manager.DataTable")
+    @patch("DockTUI.ui.managers.volume_manager.NavigableDataTable")
     def test_initialize_table(self, mock_datatable_class):
         """Test table initialization."""
         mock_table = Mock()
@@ -114,6 +114,7 @@ class TestVolumeManager:
     def test_select_volume(self):
         """Test selecting a volume."""
         mock_table = Mock()
+        mock_table.get_row_index.return_value = 4
         mock_row_key = RowKey("row1")
         # Mock the table.rows to contain the row key
         mock_table.rows = [mock_row_key]
@@ -130,7 +131,9 @@ class TestVolumeManager:
         assert self.manager.selected_volume_data == {"name": "test-volume", "in_use": True}
         assert self.parent.selected_volume_data == {"name": "test-volume", "in_use": True}
 
-        mock_table.move_cursor.assert_called_once_with(row=mock_row_key)
+        # move_cursor takes a row index, resolved from the stored row key
+        mock_table.get_row_index.assert_called_once_with(mock_row_key)
+        mock_table.move_cursor.assert_called_once_with(row=4)
         self.parent._update_footer_with_selection.assert_called_once()
         self.parent._update_cursor_visibility.assert_called_once()
         self.parent.post_message.assert_called_once()

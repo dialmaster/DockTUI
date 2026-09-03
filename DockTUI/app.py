@@ -1,7 +1,9 @@
 import logging
+import sys
 from importlib import metadata
 from typing import Dict, Iterable, Optional, Tuple, Union
 
+import docker
 from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -137,6 +139,17 @@ class DockTUIApp(App, DockerActions, RefreshActions):
         Binding("r", "remove", "Remove Selected", show=True),
         Binding("R", "remove_unused_images", "Remove All Unused Images", show=True),
         Binding("p", "prune_unused_volumes", "Prune All Unused Volumes", show=True),
+        # Pane navigation. priority=True so Tab is not consumed by the focused
+        # widget (DataTable, Input) before it reaches the app.
+        Binding("tab", "focus_next_pane", "Next Pane", show=False, priority=True),
+        Binding(
+            "shift+tab",
+            "focus_previous_pane",
+            "Previous Pane",
+            show=False,
+            priority=True,
+        ),
+        Binding("slash", "focus_filter", "Filter Logs", show=False),
     ]
 
     def __init__(self):
@@ -293,6 +306,62 @@ class DockTUIApp(App, DockerActions, RefreshActions):
         if self.refresh_timer:
             self.refresh_timer.stop()
         self.exit()
+
+    # ------------------------------------------------------------------
+    # Pane focus ring: container list -> log viewer -> filter -> follow ->
+    # mark -> tail -> since -> container list
+    # ------------------------------------------------------------------
+
+    def _pane_ring(self) -> list:
+        """Focus stops cycled by Tab/Shift+Tab, in order."""
+        if not self.container_list or not self.log_pane:
+            return []
+        log_pane = self.log_pane
+        stops = [
+            self.container_list,
+            log_pane.log_display,
+            log_pane.search_input,
+            log_pane.auto_follow_checkbox,
+            log_pane.mark_position_button,
+            log_pane.tail_select,
+            log_pane.since_select,
+        ]
+        return [stop for stop in stops if stop is not None]
+
+    def _focus_pane(self, step: int) -> None:
+        ring = self._pane_ring()
+        if not ring:
+            return
+        focused = self.focused
+        current = -1
+        if focused is not None:
+            for index, stop in enumerate(ring):
+                if stop in focused.ancestors_with_self:
+                    current = index
+                    break
+        target = ring[(current + step) % len(ring)]
+        if target is self.container_list:
+            self.container_list.focus_selected()
+        else:
+            target.focus()
+
+    def action_focus_next_pane(self) -> None:
+        """Move focus to the next pane (Tab)."""
+        self._focus_pane(1)
+
+    def action_focus_previous_pane(self) -> None:
+        """Move focus to the previous pane (Shift+Tab)."""
+        self._focus_pane(-1)
+
+    def action_focus_filter(self) -> None:
+        """Jump to the log filter box (/)."""
+        if self.log_pane and self.log_pane.search_input:
+            self.log_pane.search_input.focus()
+
+    def action_focus_container_list(self) -> None:
+        """Return focus to the container list (Escape from the log pane)."""
+        if self.container_list:
+            self.container_list.focus_selected()
 
     def action_refresh(self) -> None:
         """Trigger an asynchronous refresh of the container list."""
@@ -556,13 +625,24 @@ class DockTUIApp(App, DockerActions, RefreshActions):
             "service": ["start", "stop", "restart", "recreate"],
             "stack": ["start", "stop", "restart", "recreate", "down"],
             "network": [],
-            "image": ["remove", "remove_unused_images"],
-            "volume": ["remove", "prune_unused_volumes"],
+            "image": ["remove"],
+            "volume": ["remove"],
             "none": [],
         }
+        # Actions that operate on the whole host and never need a selection
+        HOST_WIDE_ACTIONS = {"remove_unused_images", "prune_unused_volumes"}
+        SELECTION_BOUND_ACTIONS = {
+            action_name
+            for actions in SELECTION_ACTIONS.values()
+            for action_name in actions
+        }
 
-        # Always allow system actions
-        if action in ("quit", "command_palette"):
+        if action in HOST_WIDE_ACTIONS:
+            return True
+
+        # Anything that is not a selection-bound Docker action (quit, command
+        # palette, focus movement, etc.) is always allowed.
+        if action not in SELECTION_BOUND_ACTIONS:
             return True
 
         # For Docker-specific actions, check if they apply to current selection
@@ -712,11 +792,22 @@ class DockTUIApp(App, DockerActions, RefreshActions):
         self.action_refresh()
 
 
+DOCKER_UNREACHABLE_HINT = (
+    "Cannot connect to the Docker daemon.\n"
+    "Check that Docker is running and that your user can access the Docker "
+    "socket (for example, membership in the 'docker' group), or set DOCKER_HOST."
+)
+
+
 def main():
     """Run the DockTUI application."""
     try:
         app = DockTUIApp()
         app.run()
+    except docker.errors.DockerException as e:
+        logger.error(f"Docker daemon unreachable: {str(e)}", exc_info=True)
+        print(f"{DOCKER_UNREACHABLE_HINT}\n\nDetails: {e}", file=sys.stderr)
+        sys.exit(1)
     except Exception as e:
         logger.error(f"Error running app: {str(e)}", exc_info=True)
         raise

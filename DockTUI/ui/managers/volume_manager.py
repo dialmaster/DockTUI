@@ -7,7 +7,7 @@ from rich.text import Text
 from textual.widgets import DataTable, Static
 from textual.widgets.data_table import RowKey
 
-from ..base.container_list_base import SelectionChanged
+from ..base.container_list_base import NavigableDataTable, SelectionChanged
 from ..widgets.headers import SectionHeader
 
 logger = logging.getLogger("DockTUI.volume_manager")
@@ -70,7 +70,7 @@ class VolumeManager:
             # Hide loading message if it exists
             self.hide_loading_message()
 
-            self.volume_table = DataTable(
+            self.volume_table = NavigableDataTable(
                 show_header=True,
                 header_height=1,
                 zebra_stripes=True,
@@ -232,13 +232,13 @@ class VolumeManager:
             self.selected_volume_data = volume_data
             self.parent.selected_volume_data = volume_data
 
-            # Move cursor to the selected volume
+            # Move cursor to the selected volume (move_cursor takes a row index)
             row_key = self.volume_rows[volume_name]
-
-            # Verify the row key is still valid in the table
             try:
                 if row_key in self.volume_table.rows:
-                    self.volume_table.move_cursor(row=row_key)
+                    self.volume_table.move_cursor(
+                        row=self.volume_table.get_row_index(row_key)
+                    )
             except Exception as e:
                 logger.error(f"Error moving cursor to volume {volume_name}: {e}")
 

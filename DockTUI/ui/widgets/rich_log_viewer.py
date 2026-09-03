@@ -41,7 +41,7 @@ class RichLogViewer(ScrollView):
     BINDINGS = [
         Binding("ctrl+shift+c", "copy_selection", "Copy", show=False),
         Binding("ctrl+a", "select_all", "Select All", show=False),
-        Binding("p", "toggle_prettify", "Prettify", show=False),
+        Binding("x", "toggle_prettify", "Expand JSON/XML", show=False),
     ]
 
     # Constants

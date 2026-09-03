@@ -8,7 +8,7 @@ from rich.text import Text
 from textual.containers import Container
 from textual.widgets import DataTable, Static
 
-from ..base.container_list_base import SelectionChanged
+from ..base.container_list_base import NavigableDataTable, SelectionChanged
 
 logger = logging.getLogger("DockTUI.image_manager")
 
@@ -98,7 +98,7 @@ class ImageManager:
             # Hide loading message if it exists
             self.hide_loading_message()
             # Create the images table with fixed rows to prevent scrolling
-            self.images_table = DataTable(
+            self.images_table = NavigableDataTable(
                 show_cursor=True,  # Let CSS control cursor visibility
                 cursor_type="row",
                 cursor_foreground_priority=True,
@@ -315,12 +315,12 @@ class ImageManager:
             # Remove from data cache
             self._image_data_cache.pop(image_id, None)
 
-            # Rebuild the index mapping
+            # Rebuild the index mapping. DataTable.rows is keyed by RowKey
+            # objects whose .value is the image_id we set when adding the row.
             self.image_rows.clear()
-            for idx, row in enumerate(self.images_table.rows):
-                # The row key is the image_id we set when adding the row
-                if row.key:
-                    self.image_rows[row.key] = idx
+            for idx, row_key in enumerate(self.images_table.rows):
+                if row_key.value:
+                    self.image_rows[row_key.value] = idx
         except Exception as e:
             logger.error(f"Error removing image {image_id} from table: {e}")
 

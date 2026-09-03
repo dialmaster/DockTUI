@@ -6,7 +6,7 @@ from typing import Dict, Optional, Tuple
 from textual.containers import Container
 from textual.widgets import DataTable
 
-from ..base.container_list_base import ContainerText, SelectionChanged
+from ..base.container_list_base import ContainerText, SelectionChanged, focus_is_inside
 from ..widgets.headers import StackHeader
 
 logger = logging.getLogger("DockTUI.stack_manager")
@@ -539,26 +539,13 @@ class StackManager:
                 table.styles.display = "block"
                 header._update_content()
 
-            # Check if the search input is currently focused
-            if self.parent.screen and self.parent.screen.focused:
-                focused_widget = self.parent.screen.focused
-                if (
-                    hasattr(focused_widget, "id")
-                    and focused_widget.id == "search-input"
-                ):
-                    # Still position the cursor on the selected row without focusing
-                    if table.cursor_row != row_idx:
-                        table.move_cursor(row=row_idx)
-                else:
-                    # Focus the table and position the cursor
-                    table.focus()
-                    if table.cursor_row != row_idx:
-                        table.move_cursor(row=row_idx)
-            else:
-                # Focus the table and position the cursor
+            # Only take focus when the user is already working in the container
+            # list; never pull it away from the log pane or the filter box.
+            screen = self.parent.screen
+            if focus_is_inside(self.parent, screen.focused if screen else None):
                 table.focus()
-                if table.cursor_row != row_idx:
-                    table.move_cursor(row=row_idx)
+            if table.cursor_row != row_idx:
+                table.move_cursor(row=row_idx)
 
             # Force a refresh of the table to ensure the cursor is visible
             table.refresh()

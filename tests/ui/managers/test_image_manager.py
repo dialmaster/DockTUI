@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, Mock, patch
 from rich.text import Text
 from textual.containers import Container
 from textual.widgets import DataTable, Static
+from textual.widgets.data_table import RowKey
 
 from DockTUI.ui.base.container_list_base import SelectionChanged
 from DockTUI.ui.managers.image_manager import ImageManager
@@ -115,7 +116,7 @@ class TestImageManager(unittest.TestCase):
         result = self.manager.prepare_new_containers()
         self.assertEqual(result, {})
 
-    @patch('DockTUI.ui.managers.image_manager.DataTable')
+    @patch('DockTUI.ui.managers.image_manager.NavigableDataTable')
     def test_initialize_table(self, mock_datatable):
         """Test table initialization."""
         mock_table = Mock()
@@ -150,7 +151,7 @@ class TestImageManager(unittest.TestCase):
         self.assertTrue(self.manager._table_initialized)
         self.assertEqual(self.manager.images_table, mock_table)
 
-    @patch('DockTUI.ui.managers.image_manager.DataTable')
+    @patch('DockTUI.ui.managers.image_manager.NavigableDataTable')
     def test_add_image_new(self, mock_datatable):
         """Test adding a new image."""
         mock_table = Mock()
@@ -302,21 +303,22 @@ class TestImageManager(unittest.TestCase):
         """Test removing an image from the table."""
         self.manager._table_initialized = True
         mock_table = Mock()
-        mock_row1 = Mock(key="abc123")
-        mock_row2 = Mock(key="def456")
 
-        # Initial state
-        mock_table.rows = [mock_row1, mock_row2]
+        # DataTable.rows is keyed by RowKey objects, which expose .value
+        mock_table.rows = {
+            RowKey("abc123"): Mock(),
+            RowKey("def456"): Mock(),
+            RowKey("ghi789"): Mock(),
+        }
 
         # Mock remove_row to simulate removing the row
         def remove_row_side_effect(key):
-            # Simulate removing the row by updating mock_table.rows
-            mock_table.rows = [mock_row2]  # Only def456 remains
+            mock_table.rows = {RowKey("def456"): Mock(), RowKey("ghi789"): Mock()}
 
         mock_table.remove_row.side_effect = remove_row_side_effect
 
         self.manager.images_table = mock_table
-        self.manager.image_rows = {"abc123": 0, "def456": 1}
+        self.manager.image_rows = {"abc123": 0, "def456": 1, "ghi789": 2}
         self.manager._removed_images.add("abc123")
 
         self.manager.remove_image("abc123")
@@ -328,8 +330,8 @@ class TestImageManager(unittest.TestCase):
         self.assertNotIn("abc123", self.manager.image_rows)
         self.assertNotIn("abc123", self.manager._removed_images)
 
-        # Check that remaining image has correct index
-        self.assertEqual(self.manager.image_rows["def456"], 0)
+        # Remaining images keep a complete, re-indexed mapping
+        self.assertEqual(self.manager.image_rows, {"def456": 0, "ghi789": 1})
 
     def test_remove_image_exception(self):
         """Test removing image handles exceptions."""
