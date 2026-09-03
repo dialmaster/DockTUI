@@ -275,10 +275,10 @@ class SmartLogFormatter:
         if not pattern:
             return
 
-        if HAS_PYPARSING and hasattr(pattern, "scanString"):
+        if HAS_PYPARSING and hasattr(pattern, "scan_string"):
             # pyparsing pattern
             try:
-                for tokens, start, end in pattern.scanString(text):
+                for tokens, start, end in pattern.scan_string(text):
                     for i in range(start, end):
                         if char_styles[i] is None:
                             char_styles[i] = style_name
@@ -362,10 +362,10 @@ class SmartLogFormatter:
                     return True
             return False
 
-        if HAS_PYPARSING and hasattr(pattern, "scanString"):
+        if HAS_PYPARSING and hasattr(pattern, "scan_string"):
             # pyparsing pattern
             try:
-                for tokens, start, end in pattern.scanString(text):
+                for tokens, start, end in pattern.scan_string(text):
                     if not is_in_excluded_region(start, end):
                         for i in range(start, end):
                             if char_styles[i] is None:
@@ -390,61 +390,64 @@ class SmartLogFormatter:
     def _restore_preserved_components(
         self, segments: List[Segment], placeholders: Dict[str, Tuple[str, str]]
     ) -> List[Segment]:
-        """Restore preserved components in segments."""
-        result = []
+        """Restore preserved components in segments.
 
+        Highlighting may have split a placeholder across several segments (for
+        example when a number pattern matched the digit inside it), so the
+        search runs over the joined text and segments are rebuilt around each
+        placeholder occurrence.
+        """
+        full_text = "".join(segment.text for segment in segments)
+        char_styles: List[Style] = []
         for segment in segments:
-            text = segment.text
+            char_styles.extend([segment.style] * len(segment.text))
 
-            # Check if this segment contains any placeholders
-            has_placeholder = False
-            for placeholder in placeholders:
-                if placeholder in text:
-                    has_placeholder = True
-                    break
+        # (start, end, replacement text, style) for every placeholder occurrence
+        occurrences: List[Tuple[int, int, str, Style]] = []
+        for placeholder, (comp_type, comp_text) in placeholders.items():
+            style = self._get_preserved_style(comp_type)
+            start = full_text.find(placeholder)
+            while start != -1:
+                end = start + len(placeholder)
+                occurrences.append((start, end, comp_text, style))
+                start = full_text.find(placeholder, end)
 
-            if not has_placeholder:
-                result.append(segment)
-                continue
+        if not occurrences:
+            return segments
 
-            # Split and restore placeholders
-            parts = []
-            remaining = text
+        occurrences.sort(key=lambda occurrence: occurrence[0])
 
-            while remaining:
-                found_placeholder = None
-                earliest_pos = len(remaining)
-
-                # Find the earliest placeholder
-                for placeholder in placeholders:
-                    pos = remaining.find(placeholder)
-                    if pos != -1 and pos < earliest_pos:
-                        earliest_pos = pos
-                        found_placeholder = placeholder
-
-                if found_placeholder:
-                    # Add text before placeholder
-                    if earliest_pos > 0:
-                        parts.append((remaining[:earliest_pos], segment.style))
-
-                    # Add the preserved component
-                    comp_type, comp_text = placeholders[found_placeholder]
-                    style = self._get_preserved_style(comp_type)
-                    parts.append((comp_text, style))
-
-                    # Continue with remaining text
-                    remaining = remaining[earliest_pos + len(found_placeholder) :]
-                else:
-                    # No more placeholders
-                    parts.append((remaining, segment.style))
-                    break
-
-            # Convert parts to segments
-            for text, style in parts:
-                if text:
-                    result.append(Segment(text, style))
+        result: List[Segment] = []
+        cursor = 0
+        for start, end, comp_text, style in occurrences:
+            if start < cursor:
+                continue  # overlapping placeholders cannot occur; be defensive
+            result.extend(
+                self._segments_for_range(full_text, char_styles, cursor, start)
+            )
+            result.append(Segment(comp_text, style))
+            cursor = end
+        result.extend(
+            self._segments_for_range(full_text, char_styles, cursor, len(full_text))
+        )
 
         return result
+
+    @staticmethod
+    def _segments_for_range(
+        text: str, char_styles: List[Style], start: int, end: int
+    ) -> List[Segment]:
+        """Rebuild segments for text[start:end], merging runs of equal style."""
+        segments: List[Segment] = []
+        if start >= end:
+            return segments
+
+        run_start = start
+        for index in range(start + 1, end + 1):
+            if index == end or char_styles[index] != char_styles[run_start]:
+                segments.append(Segment(text[run_start:index], char_styles[run_start]))
+                run_start = index
+        return segments
 
     def _is_json_line(self, text: str) -> bool:
         """Check if a line appears to be primarily JSON content."""

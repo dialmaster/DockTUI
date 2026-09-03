@@ -570,6 +570,24 @@ class TestDockTUIApp:
         assert app.check_action("down", ()) is True
         assert app.check_action("remove", ()) is False
 
+    def test_check_action_allows_focus_navigation_without_selection(self):
+        """Screen-level focus actions must not be blocked by check_action."""
+        app = DockTUIApp.__new__(DockTUIApp)
+        app._current_selection_type = "none"
+        app._current_selection_status = "none"
+
+        assert app.check_action("focus_next", ()) is True
+        assert app.check_action("focus_previous", ()) is True
+
+    def test_check_action_bulk_cleanup_actions_need_no_selection(self):
+        """Remove-unused-images and prune-volumes work regardless of selection."""
+        app = DockTUIApp.__new__(DockTUIApp)
+        app._current_selection_type = "none"
+        app._current_selection_status = "none"
+
+        assert app.check_action("remove_unused_images", ()) is True
+        assert app.check_action("prune_unused_volumes", ()) is True
+
     def test_check_action_image_actions(self):
         """Test check_action for image actions."""
         app = DockTUIApp.__new__(DockTUIApp)
@@ -699,6 +717,23 @@ class TestMain:
             main()
 
         mock_logger.error.assert_called()
+
+    @patch("DockTUI.app.DockTUIApp")
+    def test_main_reports_unreachable_docker_daemon(self, mock_app_class, capsys):
+        """An unreachable daemon exits cleanly with a readable message, not a traceback."""
+        import docker
+
+        mock_app_class.side_effect = docker.errors.DockerException(
+            "Error while fetching server API version: connection refused"
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "Cannot connect to the Docker daemon" in captured.err
+        assert "connection refused" in captured.err
 
 
 class TestIntegration:

@@ -140,9 +140,9 @@ class LogParser:
         ]:
             pattern = self._patterns.get_pattern(level_type)
             if pattern:
-                if hasattr(pattern, "searchString"):  # pyparsing
+                if hasattr(pattern, "scan_string"):  # pyparsing
                     try:
-                        for tokens, start, end in pattern.scanString(text):
+                        for tokens, start, end in pattern.scan_string(text):
                             if tokens:
                                 log_line.log_level = str(tokens[0]).upper()
                                 # Store match position

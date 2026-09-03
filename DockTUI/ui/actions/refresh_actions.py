@@ -46,7 +46,9 @@ class RefreshActions:
             logger.error(f"Error during refresh: {str(e)}", exc_info=True)
             self.error_display.update(f"Error refreshing: {str(e)}")
 
-    @work(thread=True)
+    # exclusive=True cancels a refresh that is still running when the next tick
+    # fires, so slow daemons cannot pile up overlapping stats collections.
+    @work(thread=True, exclusive=True, group="refresh")
     def _refresh_containers_worker(
         self: "DockTUIApp", callback
     ) -> Tuple[Dict, Dict, Dict, List]:

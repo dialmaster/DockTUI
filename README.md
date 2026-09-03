@@ -58,7 +58,25 @@ That's it! The script automatically pulls and runs DockTUI from Docker Hub.
 - **Automatic updates** - Just use `-u` flag to get latest version
 - **Multi-platform** - Works on AMD64 and ARM64 (including M1 Macs)
 - **Version control** - Pin to specific versions with `-v`
-- **Full functionality** - All features work including clipboard support
+- **Full functionality** - Clipboard sync works, and Recreate/Down run the bundled Docker CLI against your daemon. The host filesystem is mounted read-only at `/host` inside the container so compose files are found wherever they live.
+
+> **Limitation:** Recreating a service that must be *built* from source (`build:` without a prebuilt image) is not supported from inside the container, because the build context is only readable through the read-only mount. Run DockTUI directly (see the developer setup) for that case.
+
+### Running the image directly
+
+If you would rather not clone the repository, the same container can be started by hand. Mount the Docker socket, the host filesystem (read-only) and your home directory at the same path:
+
+```bash
+docker run --rm -it \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v /:/host:ro \
+  -v "$HOME:$HOME:ro" \
+  -e DOCKTUI_HOST_ROOT=/host \
+  --user "$(id -u):$(id -g)" --group-add "$(getent group docker | cut -d: -f3)" \
+  dialmaster/docktui:latest
+```
+
+`start.sh` adds clipboard syncing, macOS socket detection and debug logging on top of this.
 
 ### For Developers
 
@@ -68,11 +86,23 @@ If you want to contribute or run DockTUI without Docker, see [DEVELOPMENT.md](DE
 
 ### Keyboard Shortcuts
 
-#### Navigation
-- `↑/↓` - Navigate through items
-- `←/→` or `Enter` - Collapse/expand sections
-- `Tab` - Switch between panels
+Everything can be driven from the keyboard; the mouse is optional.
+
+#### Navigation (left pane)
+- `↑/↓` - Move through section headers, stacks, containers, images, volumes and networks. The selection (and the log pane) follows the cursor.
+- `Enter` or `Space` - Expand/collapse the focused section, stack or network. On a row of a network's container table, `Enter` jumps to that container.
+- `←/→` - Collapse/expand the focused item (`←` on a container row collapses its stack)
+- `Home/End`, `PgUp/PgDn` - Jump within a table
+- `Tab` / `Shift+Tab` - Cycle focus: container list → log viewer → filter box → follow → mark → tail/since selectors
 - `q` - Quit
+
+#### Log pane
+- `/` - Jump to the log filter box (from anywhere)
+- `Esc` - Return to the container list
+- `f` - Toggle auto-follow
+- `m` - Mark the current log position with a timestamp
+- `x` - Expand/collapse JSON/XML on the line at the top of the view
+- `c` / `Ctrl+Shift+C` - Copy the selection, `a` / `Ctrl+A` - Select all
 
 #### Container/Stack Actions
 - `s` - Start
@@ -84,14 +114,16 @@ If you want to contribute or run DockTUI without Docker, see [DEVELOPMENT.md](DE
 
 #### Image Management
 - `r` - Remove selected unused image
-- `R` - Remove all unused images
+- `R` - Remove all unused images (works regardless of selection)
 
 #### Volume Management
 - `r` - Remove selected volume (when not in use)
-- `p` - Prune all unused volumes
+- `p` - Prune all unused volumes (works regardless of selection)
 
 #### Quick Access
 - `Ctrl+\` - Open command palette
+
+If a container or stack operation fails, the daemon's error message is shown in the status area above the container list.
 
 ### Log Viewer
 

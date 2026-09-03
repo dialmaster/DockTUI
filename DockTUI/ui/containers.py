@@ -12,7 +12,7 @@ from .managers.image_manager import ImageManager
 from .managers.network_manager import NetworkManager
 from .managers.stack_manager import StackManager
 from .managers.volume_manager import VolumeManager
-from .widgets.headers import NetworkHeader, StackHeader
+from .widgets.headers import NetworkHeader, SectionHeader, StackHeader
 
 logger = logging.getLogger("DockTUI.containers")
 
@@ -72,13 +72,16 @@ class ContainerList(ContainerListBase):
 
     def end_update(self) -> None:
         """End a batch update and apply pending changes to the UI."""
+        first_load = False
         try:
             # Remove loading message on first data load
-            if not self._initial_load_complete and self.loading_message:
-                if self.loading_message.parent:
-                    self.loading_message.remove()
-                self.loading_message = None
+            if not self._initial_load_complete:
+                if self.loading_message is not None:
+                    if self.loading_message.parent:
+                        self.loading_message.remove()
+                    self.loading_message = None
                 self._initial_load_complete = True
+                first_load = True
 
             # First, clean up items that no longer exist in the Docker data
             self._cleanup_removed_items()
@@ -105,10 +108,43 @@ class ContainerList(ContainerListBase):
             self._update_cursor_visibility()
 
             self._is_updating = False
+
+            # Widgets exist now: give the keyboard somewhere to start
+            if first_load:
+                self._schedule_initial_focus()
         finally:
             if len(self.children) > 0:
                 self.refresh()
             self._is_updating = False
+
+    def _schedule_initial_focus(self) -> None:
+        """Focus the first stack once the freshly mounted widgets are ready."""
+        try:
+            self.call_after_refresh(self._focus_initial_item)
+        except Exception:
+            # Not attached to a running app (e.g. unit tests): focus directly
+            self._focus_initial_item()
+
+    def _focus_initial_item(self) -> None:
+        """Expand, focus and select the first stack after the initial load.
+
+        Does nothing if something is already selected or the user has moved
+        focus outside the container list in the meantime.
+        """
+        try:
+            if self.selected_item is not None:
+                return
+            if not self.navigation_handler.focus_is_in_list():
+                return
+            if not self.stack_headers:
+                return
+            # Stacks are displayed sorted by name (see prepare_new_containers),
+            # so the first one on screen is the alphabetically first name.
+            first_header = self.stack_headers[sorted(self.stack_headers)[0]]
+            self._set_expanded(first_header, True)
+            self.navigation_handler.focus_widget(first_header)
+        except Exception as e:
+            logger.error(f"Error focusing initial item: {str(e)}", exc_info=True)
 
     def _cleanup_removed_items(self) -> None:
         """Remove images, volumes, networks, and stacks that no longer exist."""
@@ -379,9 +415,12 @@ class ContainerList(ContainerListBase):
         self.selected_container_data = self.stack_manager.selected_container_data
 
     def on_mount(self) -> None:
-        """Handle initial widget mount by focusing and expanding the first stack."""
+        """Show the loading placeholder until the first refresh delivers data.
+
+        Focusing the first stack happens in _focus_initial_item once that data
+        has been mounted; at mount time there is nothing to focus yet.
+        """
         try:
-            # Show loading message if this is the initial load
             if not self._initial_load_complete and len(self.children) == 0:
                 self.loading_message = Static(
                     Text("Please wait, loading data...", style="dim italic"),
@@ -392,38 +431,97 @@ class ContainerList(ContainerListBase):
                 self.loading_message.styles.content_align = ("center", "middle")
                 self.loading_message.styles.padding = (2, 0)
                 self.mount(self.loading_message)
-                return  # Don't try to focus anything yet
-
-            # Check if the search input is currently focused
-            should_focus = True
-            if self.screen and self.screen.focused:
-                focused_widget = self.screen.focused
-                if (
-                    hasattr(focused_widget, "id")
-                    and focused_widget.id == "search-input"
-                ):
-                    should_focus = False
-
-            headers = list(self.stack_headers.values())
-            if headers:
-                first_header = headers[0]
-                if should_focus:
-                    first_header.focus()
-                first_header.expanded = True
-                first_table = self.stack_tables[first_header.stack_name]
-                first_table.styles.display = "block"
-
-                # Select the stack header only, not any container
-                self.select_stack(first_header.stack_name)
-
-                # Ensure no row is selected in any table initially
-                for table in self.stack_tables.values():
-                    if table.row_count > 0:
-                        # Blur the table to remove cursor highlight
-                        table.blur()
         except Exception as e:
             logger.error(f"Error during ContainerList mount: {str(e)}", exc_info=True)
-            raise
+
+    # ------------------------------------------------------------------
+    # Expand / collapse
+    # ------------------------------------------------------------------
+
+    def _focused_widget(self):
+        return self.screen.focused if self.screen else None
+
+    def _set_expanded(self, header, expanded: bool) -> None:
+        """Expand or collapse a stack or network header together with its table."""
+        if isinstance(header, StackHeader):
+            table = self.stack_tables.get(header.stack_name)
+        elif isinstance(header, NetworkHeader):
+            table = self.network_tables.get(header.network_name)
+        else:
+            return
+        header.expanded = expanded
+        if table is not None:
+            table.styles.display = "block" if expanded else "none"
+        header._update_content()
+
+    def _set_section_expanded(self, header: SectionHeader, expanded: bool) -> None:
+        """Expand or collapse one of the top-level sections."""
+        header.collapsed = not expanded
+        header._update_content()
+        self._apply_section_state(header)
+
+    def _apply_section_state(self, header: SectionHeader) -> None:
+        """Show or hide a section's content to match its header's collapsed flag."""
+        collapsed = header.collapsed
+        if header is self.stacks_section_header:
+            self.stacks_section_collapsed = collapsed
+            container = self.stacks_container
+        elif header is self.images_section_header:
+            self.images_section_collapsed = collapsed
+            container = self.images_container
+            if not collapsed and not self.image_manager._table_initialized:
+                self.image_manager.show_loading_message()
+        elif header is self.volumes_section_header:
+            self.volumes_section_collapsed = collapsed
+            container = self.volumes_container
+            if not collapsed and not self.volume_manager._table_initialized:
+                self.volume_manager.show_loading_message()
+        elif header is self.networks_section_header:
+            self.networks_section_collapsed = collapsed
+            container = self.networks_container
+        else:
+            return
+        if container:
+            container.styles.display = "none" if collapsed else "block"
+
+    def _header_for_table(self, table):
+        """Return the stack or network header owning a table, if any."""
+        for name, stack_table in self.stack_tables.items():
+            if stack_table is table:
+                return self.stack_headers.get(name)
+        for name, network_table in self.network_tables.items():
+            if network_table is table:
+                return self.network_headers.get(name)
+        return None
+
+    def _set_focused_expanded(self, expanded: bool) -> None:
+        focused = self._focused_widget()
+        if isinstance(focused, SectionHeader):
+            self._set_section_expanded(focused, expanded)
+        elif isinstance(focused, (StackHeader, NetworkHeader)):
+            self._set_expanded(focused, expanded)
+        elif isinstance(focused, DataTable) and not expanded:
+            # Left on a row collapses the surrounding stack/network
+            header = self._header_for_table(focused)
+            if header is not None:
+                self._set_expanded(header, False)
+                self.navigation_handler.focus_widget(header)
+
+    def action_toggle_item(self) -> None:
+        """Toggle the focused section, stack or network (Enter/Space)."""
+        focused = self._focused_widget()
+        if isinstance(focused, SectionHeader):
+            self._set_section_expanded(focused, focused.collapsed)
+        elif isinstance(focused, (StackHeader, NetworkHeader)):
+            self._set_expanded(focused, not focused.expanded)
+
+    def action_collapse_item(self) -> None:
+        """Collapse the focused item (Left)."""
+        self._set_focused_expanded(False)
+
+    def action_expand_item(self) -> None:
+        """Expand the focused item (Right)."""
+        self._set_focused_expanded(True)
 
     def select_image(self, image_id: str) -> None:
         """Select an image and update the footer.
@@ -674,44 +772,22 @@ class ContainerList(ContainerListBase):
 
     # Event handlers
     def on_section_header_clicked(self, event) -> None:
-        """Handle SectionHeader click events to toggle section visibility."""
-        header = event.section_header
+        """Handle SectionHeader click events (the header has already toggled)."""
+        self._apply_section_state(event.section_header)
 
-        # Update the collapsed state based on which section was clicked
-        if header == self.stacks_section_header:
-            self.stacks_section_collapsed = header.collapsed
-            # Toggle visibility of the stacks container
-            if self.stacks_container:
-                self.stacks_container.styles.display = (
-                    "none" if header.collapsed else "block"
-                )
-        elif header == self.volumes_section_header:
-            self.volumes_section_collapsed = header.collapsed
-            # Toggle visibility of the volumes container
-            if self.volumes_container:
-                self.volumes_container.styles.display = (
-                    "none" if header.collapsed else "block"
-                )
-                # Show loading message when expanding if table not initialized
-                if not header.collapsed and not self.volume_manager._table_initialized:
-                    self.volume_manager.show_loading_message()
-        elif header == self.images_section_header:
-            self.images_section_collapsed = header.collapsed
-            # Toggle visibility of the images container
-            if self.images_container:
-                self.images_container.styles.display = (
-                    "none" if header.collapsed else "block"
-                )
-                # Show loading message when expanding if table not initialized
-                if not header.collapsed and not self.image_manager._table_initialized:
-                    self.image_manager.show_loading_message()
-        elif header == self.networks_section_header:
-            self.networks_section_collapsed = header.collapsed
-            # Toggle visibility of the networks container
-            if self.networks_container:
-                self.networks_container.styles.display = (
-                    "none" if header.collapsed else "block"
-                )
+    def on_data_table_row_highlighted(self, event) -> None:
+        """Follow the cursor with the selection for keyboard-driven moves.
+
+        Covers keys DataTable handles itself (Home/End/PageUp/PageDown). The
+        navigation handler ignores rows that are already selected, and refresh
+        rebuilds are skipped so restoring a cursor never re-selects.
+        """
+        if self._is_updating:
+            return
+        table = event.data_table
+        if not table.has_focus:
+            return
+        self.navigation_handler.select_row_at_cursor(table)
 
     def on_image_header_selected(self, event) -> None:
         """Handle ImageHeader selection events."""
@@ -755,19 +831,19 @@ class ContainerList(ContainerListBase):
             self.volume_manager.handle_table_selection(row_key)
             return
 
-        # Find which stack this table belongs to
-        for stack_name, stack_table in self.stack_tables.items():
-            if stack_table == table:
-                try:
-                    row = table.get_row_index(row_key)
-                    if row is not None and row < table.row_count:
-                        container_id = str(table.get_cell_at((row, 0)))
-                        self.select_container(container_id)
-                except Exception as e:
-                    logger.error(
-                        f"Error handling row selection: {str(e)}", exc_info=True
-                    )
-                break
+        # Stack tables select the container; network tables jump to it
+        # (the first column of both holds the container ID).
+        owned_tables = list(self.stack_tables.values()) + list(
+            self.network_tables.values()
+        )
+        if table in owned_tables:
+            try:
+                row = table.get_row_index(row_key)
+                if row is not None and row < table.row_count:
+                    container_id = str(table.get_cell_at((row, 0)))
+                    self.select_container(container_id)
+            except Exception as e:
+                logger.error(f"Error handling row selection: {str(e)}", exc_info=True)
 
     def action_cursor_up(self) -> None:
         """Handle up arrow key."""
@@ -776,3 +852,7 @@ class ContainerList(ContainerListBase):
     def action_cursor_down(self) -> None:
         """Handle down arrow key."""
         self.navigation_handler.handle_cursor_down()
+
+    def focus_selected(self) -> None:
+        """Focus the widget showing the current selection (used when tabbing back)."""
+        self.navigation_handler.focus_selected()

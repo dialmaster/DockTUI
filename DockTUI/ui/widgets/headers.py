@@ -33,6 +33,12 @@ class SectionHeader(Static):
         background: $primary-lighten-1;
         color: $text;
     }
+
+    SectionHeader:focus {
+        background: $primary-lighten-2;
+        color: $text;
+        text-style: bold reverse;
+    }
     """
 
     class Clicked(Message):
@@ -53,7 +59,7 @@ class SectionHeader(Static):
         self.collapsed = collapsed
         super().__init__("")
         self._update_content()
-        self.can_focus = False  # Section headers are not focusable
+        self.can_focus = True  # Reachable with the keyboard (Up/Down, Enter)
 
     def _update_content(self) -> None:
         """Update the header's displayed content based on current state."""

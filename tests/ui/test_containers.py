@@ -542,76 +542,70 @@ class TestContainerList:
                 # Verify mounted
                 container_list.mount.assert_called_once_with(mock_static_instance)
 
-    def test_on_mount_with_stacks(self, container_list):
-        """Test on_mount method with existing stacks."""
-        # Set up state
+    def test_on_mount_after_initial_load_does_not_touch_focus(self, container_list):
+        """on_mount only shows the loading placeholder; it never focuses stacks."""
         container_list._initial_load_complete = True
 
-        # Mock children property to return non-empty list
         with patch.object(type(container_list), 'children', new_callable=PropertyMock) as mock_children:
             mock_children.return_value = [Mock()]
-
-            # Create mock stack header and table
-            mock_header = Mock()
-            mock_header.stack_name = "test-stack"
-            mock_header.expanded = False
-            mock_table = Mock()
-            mock_table.row_count = 5
-
+            mock_header = Mock(spec=StackHeader)
             container_list.stack_headers = {"test-stack": mock_header}
-            container_list.stack_tables = {"test-stack": mock_table}
             container_list.select_stack = Mock()
 
-            # Call on_mount
             container_list.on_mount()
 
-            # Verify first stack focused and expanded
-            mock_header.focus.assert_called_once()
-            assert mock_header.expanded is True
-            assert mock_table.styles.display == "block"
+            mock_header.focus.assert_not_called()
+            container_list.select_stack.assert_not_called()
 
-            # Verify stack selected
-            container_list.select_stack.assert_called_once_with("test-stack")
+    def test_focus_initial_item_focuses_and_expands_first_stack(self, container_list):
+        """After the first load the first stack is expanded, focused and selected."""
+        mock_header = Mock(spec=StackHeader)
+        mock_header.stack_name = "test-stack"
+        mock_header.expanded = False
+        mock_table = Mock()
+        mock_table.row_count = 5
 
-            # Verify table blurred
-            mock_table.blur.assert_called_once()
+        container_list.stack_headers = {"test-stack": mock_header}
+        container_list.stack_tables = {"test-stack": mock_table}
+        container_list.select_stack = Mock()
 
-    def test_on_mount_with_search_input_focused(self, container_list):
-        """Test on_mount when search input is focused."""
-        # Set up state
-        container_list._initial_load_complete = True
+        container_list._focus_initial_item()
 
-        # Mock children property to return non-empty list
-        with patch.object(type(container_list), 'children', new_callable=PropertyMock) as mock_children:
-            mock_children.return_value = [Mock()]
+        mock_header.focus.assert_called_once()
+        assert mock_header.expanded is True
+        assert mock_table.styles.display == "block"
+        container_list.select_stack.assert_called_once_with("test-stack")
 
-            # Mock search input focused
-            mock_search = Mock()
-            mock_search.id = "search-input"
+    def test_focus_initial_item_leaves_focus_outside_the_list_alone(self, container_list):
+        """Initial focus must not steal focus the user already moved elsewhere."""
+        mock_search = Mock()
+        mock_search.id = "search-input"
 
-            # Update the screen's focused widget
-            with patch.object(ContainerList, 'screen', new_callable=PropertyMock) as mock_screen_prop:
-                mock_screen = MockScreen(focused=mock_search)
-                mock_screen_prop.return_value = mock_screen
+        with patch.object(ContainerList, 'screen', new_callable=PropertyMock) as mock_screen_prop:
+            mock_screen_prop.return_value = MockScreen(focused=mock_search)
 
-                # Create mock stack header and table
-                mock_header = Mock()
-                mock_header.stack_name = "test-stack"
-                mock_header.expanded = False
-                mock_table = Mock()
-                mock_table.row_count = 5
-                mock_table.styles = Mock()
-                mock_table.blur = Mock()
+            mock_header = Mock(spec=StackHeader)
+            mock_header.stack_name = "test-stack"
+            mock_header.expanded = False
+            container_list.stack_headers = {"test-stack": mock_header}
+            container_list.stack_tables = {"test-stack": Mock()}
+            container_list.select_stack = Mock()
 
-                container_list.stack_headers = {"test-stack": mock_header}
-                container_list.stack_tables = {"test-stack": mock_table}
-                container_list.select_stack = Mock()
+            container_list._focus_initial_item()
 
-                # Call on_mount
-                container_list.on_mount()
+            mock_header.focus.assert_not_called()
+            container_list.select_stack.assert_not_called()
 
-                # Verify header not focused when search is active
-                mock_header.focus.assert_not_called()
+    def test_focus_initial_item_keeps_existing_selection(self, container_list):
+        """A selection made before the first load completes is respected."""
+        container_list.selected_item = ("container", "abc")
+        mock_header = Mock(spec=StackHeader)
+        container_list.stack_headers = {"test-stack": mock_header}
+        container_list.select_stack = Mock()
+
+        container_list._focus_initial_item()
+
+        mock_header.focus.assert_not_called()
 
     def test_update_container_status(self, container_list):
         """Test update_container_status method."""

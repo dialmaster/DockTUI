@@ -411,6 +411,23 @@ class TestSmartLogFormatter:
         reconstructed = "".join(seg.text for seg in segments)
         assert reconstructed == text
 
+    def test_restore_preserved_components_split_across_segments(self, formatter):
+        """A placeholder split by highlighting is still restored to its original text."""
+        from rich.segment import Segment
+        from rich.style import Style
+
+        placeholders = {"__PRESERVE_0__": ("timestamp", "2024-01-01")}
+        # The "0" inside the placeholder was styled separately (as a number)
+        segments = [
+            Segment("__PRESERVE_", Style()),
+            Segment("0", Style(color="cyan")),
+            Segment("__ rest", Style()),
+        ]
+
+        restored = formatter._restore_preserved_components(segments, placeholders)
+
+        assert "".join(seg.text for seg in restored) == "2024-01-01 rest"
+
     def test_highlight_log_patterns_with_log_line(self, formatter, mock_theme):
         """Test pattern highlighting with pre-parsed log line data."""
         formatter.theme = mock_theme

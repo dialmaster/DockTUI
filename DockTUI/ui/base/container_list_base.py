@@ -71,7 +71,65 @@ class ContainerText:
         return text
 
 
-class ContainerDataTable(DataTable):
+def focus_is_inside(container: object, focused: object) -> bool:
+    """Return True when nothing is focused or the focused widget is inside container.
+
+    Used to decide whether code reacting to selection changes or refreshes may
+    take focus: it must never pull focus away from another pane.
+    """
+    if focused is None:
+        return True
+    ancestors = getattr(focused, "ancestors_with_self", None)
+    try:
+        return container in ancestors
+    except TypeError:
+        return False
+
+
+class NavigableDataTable(DataTable):
+    """DataTable whose cursor keys are routed through the owning ContainerList.
+
+    DataTable binds Up/Down/Left/Right itself and would otherwise swallow the
+    keys before the container list can move the selection, step into the
+    neighbouring header or section, or collapse the surrounding stack.
+    """
+
+    def _owner(self) -> Optional["ContainerListBase"]:
+        for node in self.ancestors:
+            if isinstance(node, ContainerListBase):
+                return node
+        return None
+
+    def action_cursor_up(self) -> None:
+        owner = self._owner()
+        if owner is None:
+            super().action_cursor_up()
+        else:
+            owner.action_cursor_up()
+
+    def action_cursor_down(self) -> None:
+        owner = self._owner()
+        if owner is None:
+            super().action_cursor_down()
+        else:
+            owner.action_cursor_down()
+
+    def action_cursor_left(self) -> None:
+        owner = self._owner()
+        if owner is None:
+            super().action_cursor_left()
+        else:
+            owner.action_collapse_item()
+
+    def action_cursor_right(self) -> None:
+        owner = self._owner()
+        if owner is None:
+            super().action_cursor_right()
+        else:
+            owner.action_expand_item()
+
+
+class ContainerDataTable(NavigableDataTable):
     """Custom DataTable for displaying container information.
 
     Container styling is handled by ContainerText objects which include
@@ -255,6 +313,8 @@ class ContainerListBase(VerticalScroll):
         Binding("down", "cursor_down", "Down", show=False),
         Binding("enter", "toggle_item", "Expand/Collapse", show=True),
         Binding("space", "toggle_item", "Expand/Collapse", show=False),
+        Binding("left", "collapse_item", "Collapse", show=False),
+        Binding("right", "expand_item", "Expand", show=False),
     ]
 
     def __init__(self):
@@ -391,7 +451,7 @@ class ContainerListBase(VerticalScroll):
         Returns:
             DataTable: A configured table for displaying network container information
         """
-        table = DataTable()
+        table = NavigableDataTable()
         table.add_columns("Container ID", "Container Name", "Stack", "IP Address")
 
         # Configure cursor behavior
@@ -455,22 +515,15 @@ class ContainerListBase(VerticalScroll):
         self._ensure_section_headers()
 
     def action_toggle_item(self) -> None:
-        """Toggle the visibility of the selected item."""
-        # Check if a network header has focus
-        for network_name, header in self.network_headers.items():
-            if header.has_focus:
-                table = self.network_tables[network_name]
-                header.toggle()
-                table.styles.display = "block" if header.expanded else "none"
-                return
+        """Toggle the visibility of the focused stack or network."""
+        self.action_toggle_network()
+        self.action_toggle_stack()
 
-        # Check if a stack header has focus
-        for stack_name, header in self.stack_headers.items():
-            if header.has_focus:
-                table = self.stack_tables[stack_name]
-                header.toggle()
-                table.styles.display = "block" if header.expanded else "none"
-                return
+    def action_collapse_item(self) -> None:
+        """Collapse the focused item (overridden by ContainerList)."""
+
+    def action_expand_item(self) -> None:
+        """Expand the focused item (overridden by ContainerList)."""
 
     def action_toggle_network(self) -> None:
         """Toggle the visibility of the selected network's container table."""

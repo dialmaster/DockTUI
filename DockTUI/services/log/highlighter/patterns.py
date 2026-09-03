@@ -128,7 +128,9 @@ class LogPatterns:
         patterns["duration_value"] = Combine(
             Word(nums + ".") + Regex(r"\s*(?:ms|s|m|h|d|ns|us|µs)")
         )
-        patterns["number"] = ppc.real_number | ppc.signed_integer
+        # ppc.number covers reals, scientific notation and signed integers and
+        # exists across pyparsing 3.x (real_number never did).
+        patterns["number"] = ppc.number.copy()
 
         # Process patterns
         patterns["thread"] = Regex(r"Thread-\d+|\[Thread-\d+\]")

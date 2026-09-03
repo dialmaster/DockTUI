@@ -28,6 +28,9 @@ class LogPane(Vertical):
     BINDINGS = [
         Binding("c", "copy_selection", "Copy selected text", show=False),
         Binding("a", "select_all", "Select all text", show=False),
+        Binding("f", "toggle_follow", "Toggle auto-follow", show=False),
+        Binding("m", "mark_position", "Mark log position", show=False),
+        Binding("escape", "app.focus_container_list", "Back to list", show=False),
     ]
 
     DEFAULT_CSS = LOG_PANE_CSS
@@ -138,7 +141,8 @@ class LogPane(Vertical):
 
         # Footer with instructions
         yield Static(
-            "📋 Double-click to expand JSON/XML • Click+drag to select • Right-click or 'c' to copy",
+            "📋 Tab/Esc switch pane • / filter • f follow • m mark • x or double-click "
+            "expands JSON/XML • c copies selection",
             classes="log-footer",
         )
 
@@ -490,6 +494,15 @@ class LogPane(Vertical):
         """Handle button presses."""
         if event.button.id == "mark-position-button":
             self._mark_position()
+
+    def action_toggle_follow(self):
+        """Toggle auto-follow from the keyboard (f)."""
+        if self.auto_follow_checkbox is not None:
+            self.auto_follow_checkbox.toggle()
+
+    def action_mark_position(self):
+        """Add a timestamp marker from the keyboard (m)."""
+        self._mark_position()
 
     def _mark_position(self):
         """Add a timestamp marker to the log display."""
