@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.9](https://github.com/dialmaster/DockTUI/compare/v0.2.8...v0.2.9) (2026-09-04)
+
+
+### Features
+
+* add container status colors and improve log copy shortcut ([c1338b6](https://github.com/dialmaster/DockTUI/commit/c1338b6ae894ef5b65f9e4342bf236aa98a33796))
+* add container status colors and improve log copy shortcut ([43f4e16](https://github.com/dialmaster/DockTUI/commit/43f4e16aa3e83be9605eb1cfd0cf9a358b65d760))
+* keyboard nav, docker cli, error reporting ([9b1b061](https://github.com/dialmaster/DockTUI/commit/9b1b06128f08a76bf37f88dbe8eb3afafe857f09))
+* keyboard nav, docker cli, error reporting ([2c001f4](https://github.com/dialmaster/DockTUI/commit/2c001f4e83e3b5c414dc245c85bc6334c84d2f4b))
+
 ## [0.2.8](https://github.com/dialmaster/DockTUI/compare/v0.2.7...v0.2.8) (2025-07-16)
 
 
